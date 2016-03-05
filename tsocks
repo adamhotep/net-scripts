@@ -1,47 +1,455 @@
 #!/bin/sh
-##########################################
-## Smart wrapper script for the tsocks(8) transparent socksification library
-## Usage:  tsocks [OPTIONS] [application [application arguments]]
-##   -on (or -off)   Add (or remove) tsocks(8) from the LD_PRELOAD variable.
-##   -show (or -sh)  Show the current value of the LD_PRELOAD variable.
-## With no arguments, tsocks creates a shell w/ LD_PRELOAD including tsocks(8)
-## 
-## Tsocks-wrapper 0.1, Copyright (C) 2009 Adam Katz <scriptsATkhopiscom>, GPLv3
-##########################################
-### 0.1 Rewritten from Debian's tsocks script by Tamas Szerb <toma@rulez.org>
-##########################################
 
-# Grab top double-comment lines for help:
-help() { sed -e '/^## /!d' -e 's///' "`which $0 || echo $0`"; }
+help() { cat <</help
+Smart wrapper script for the tsocks(8) transparent socksification library
+Usage:  ${0##*/} [OPTIONS] [APP [APP ARGS]]
+        eval \`${0##*/} -on|-off\`
+  -show (or -sh)   Show whether tsocks is set in the environment (\$LD_PRELOAD)
+  -debug [level]   Sets debug level (1 if unspecified).  Defaults to 0.
+  -lib tsocks-lib  Full path to libtsocks.so
+  -c config-file   Use this instead of ~/.tsocks.conf or /etc/tsocks.conf
+  -0               No config file (trumps -c), go from scratch (command-line).
+  -save [file]     Save these settings to a file (default=~/.tsocks.conf)
+  -s server[:port] Specifies the SOCKS server hostname/IP (default=127.0.0.1).
+  -p port          Specifies the SOCKS server port number (default=1080).
+  -t socks-type    Specifies the SOCKS server type (4 or 5, default=5).
+  -u username      Specifies the username for SOCKS 5 authentication.
+  -P password      Specifies the password for SOCKS 5 authentication.
+  -f (-F reverses) Fallback to direct connection if the SOCKS server is down.
+  -l local-net     An IP/Subnet pair (e.g. 10.0.0.0/255.0.0.0) specifying a
+                   network to NOT proxy for.  You may use -l multiple times.
+  -n "net-conf"    Network path.  Net-conf is a QUOTED collection of arguments
+                   for a network range, containing -r, -s, and any of [sptuPf].
+  -r remote-net    An IP/Subnet pair (like -l) for within a net-conf scope.
+  APP [APP ARGS]   Full command to run with SOCKS (default=${SHELL:-/bin/sh}).
+Tsocks-wrapper 0.3, Copyright (C) 2009-10 Adam Katz <scriptsATkhopiscom>, GPLv3
+/help
+}
 
-[ -r "$TSOCKS_LIB" ] || TSOCKS_LIB="/usr/lib/libtsocks.so"
+changelog() { cat <</changelog
+  0.1 Rewritten from Debian's tsocks script by Tamas Szerb <toma@rulez.org>
+  0.2 Every option in tsocks(8) and tsocks.conf now has an argument.
+      Also added -lib, -c, -0, -save, and -debug options.
+/changelog
+}
+
+long_desc() { cat <</long_desc
+This script merely sets the environment for the transparent socks config and
+then either runs the specified program or dumps the user in a shell.  If
+sourced or eval'd, it will set the environment for within the current shell
+(as was done by the original script by Tamas Szerb).  This script is far more
+powerful because it tweaks the apparent configuration file and allows
+specifying alternate files for this use.  The tools used for this purpose are
+shell environment variables and the configuration file itself.  See also
+http://sourceforge.net/forum/forum.php?thread_id=1352634&forum_id=54983
+/long_desc
+}
+
+
+s='[	 ]' # match any type of space
+err() { echo "${0##*/}: $*" >${TSOCKS_DEBUG_FILE:-/dev/stderr}; }
+
+if [ -z "$TSOCKS_CONF_FILE" ]; then
+  TSOCKS_CONF_FILE="$HOME/.tsocks.conf"
+  [ -f "$TSOCKS_CONF_FILE" -a -s "$TSOCKS_CONF_FILE" \
+    -a -r "$TSOCKS_CONF_FILE" ] || TSOCKS_CONF_FILE="/etc/tsocks.conf"
+fi
+
+# Other defaults, which we're leaving blank or as inherited, follow:
+# TSOCKS_DEBUG, TSOCKS_DEBUG_FILE, TSOCKS_USERNAME, TSOCKS_PASSWORD
+# (see   man 8 tsocks   for more detail)
+
 
 tsocks_enable() {
   case $LD_PRELOAD in
     *$TSOCKS_LIB*) true ;; # it's already enabled, so this is a no-op
-    *) export LD_PRELOAD="$TSOCKS_LIB $LD_PRELOAD" ;;
+    *) [ -z "$1" ] && export LD_PRELOAD="$TSOCKS_LIB $LD_PRELOAD" ;;
   esac
+  # this returns false when tsocks is not loaded AND there is an argument
 }
 
-tsocks_disable() {
-  LD_PRELOAD=`echo -n $LD_PRELOAD |sed "s:$TSOCKS_LIB *::"`
-  [ -n "LD_PRELOAD" ] && export LD_PRELOAD || unset LD_PRELOAD
+arg() {
+  echo "$1" |sed -e "s/^--*[^=]*=/-=/" -e "s/^--.[^ ]*//" -e "s/^-.//" \
+    |grep . || echo "${2:-/::}"
 }
 
-while [ "x$1" = "x-${1#?}" ]; do
+parse_args() {
+ NUM_ARGS=$#
+ [ $# = 1 -a -n "$TOP" ] && LONE=true
+ while [ "x$1" = "x-${1#?}" ] || [ -n "$LONE" ]; do
   case $1 in
-    -on ) tsocks_enable; exit 0 ;;
-    -off ) tsocks_disable; exit 0 ;;
-    -show|sh) echo "LD_PRELOAD=\"$LD_PRELOAD\""; exit 0 ;;
-    -h|-?|--help ) help; exit 0 ;;
-    -- ) break ;;
-    -* ) help; exit 1 ;;
+    -show|-sh|--sh|--sho* )
+	[ -z "$LONE" ] && err "'$1' must be the sole argument." && exit 1
+	echo "tsocks is `tsocks_enable --check || echo 'NOT '`loaded."
+	[ -n "$LD_PRELOAD" ] && echo "LD_PRELOAD is '$LD_PRELOAD'"
+	exit 0
+	;;
+    on|-on )
+	[ -z "$LONE" ] && err "'$1' must be the sole argument." && exit 1
+	[ "$1" = "on" ] && type "$1" >/dev/null 2>&1 && shift && continue
+	tsocks_enable
+	echo "LD_PRELOAD='$LD_PRELOAD'"
+	exit 0
+	;;
+    off|-off )
+	[ -z "$LONE" ] && err "'$1' must be the sole argument." && exit 1
+	[ "$1" = "off" ] && type "$1" >/dev/null 2>&1 && shift && continue
+	TURN_OFF=true
+	;;
+
+    -d*|--debug=*)
+	[ -z "$TOP" ] && debug "declaring '$1' inside an '-n' network (huh?)"
+	TSOCKS_DEBUG=`arg "$1" "$2"`
+	# this has an OPTIONAL argument, so we have to check for it here.
+	# we also have to ensure we aren't parsing the -0 argument.
+	if ! [ "$TSOCKS_DEBUG" != "-0" -a "$TSOCKS_DEBUG" -ge 0 ] 2>/dev/null
+	  then TSOCKS_DEBUG=1
+	  else [ "$TSOCKS_DEBUG" = "$2" ] && shift
+	fi
+	;;
+
+    -lib*|--lib*)
+	if [ -z "$TOP" ]; then
+	  err "Discarding argument '$1' which is invalid inside of an '-n'"
+	  shift; continue
+	fi
+	LIB=`arg "$1" "$2"`
+	[ -r "$LIB" ] && TSOCKS_LIB="$LIB" && [ "$LIB" = "$2" ] && shift
+	;;
+    -c*|--conf*=*|--with-conf-file*)
+	if [ -z "$TOP" ]; then
+	  err "Discarding argument '$1' which is invalid inside of an '-n'"
+	  shift; continue
+	fi
+	CONF=`arg "$1" "$2"`
+	[ "$CONF" = "$2" ] && shift
+	;;
+    -0|--0)
+	if [ -z "$TOP" ]; then
+	  err "Discarding argument '$1' which is invalid inside of an '-n'"
+	  shift; continue
+	fi
+	NO_CONF=true
+	;;
+    -save*|--save*)
+	if [ -z "$TOP" ]; then
+	  err "Discarding argument '$1' which is invalid inside of an '-n'"
+	  shift; continue
+	fi
+	SAVE=`arg "$1" "$2"`
+	touch "$SAVE" && DO_SAVE=true && [ "$SAVE" = "$2" ] && shift
+	;;
+    -u*|--user*)
+	USR=`arg "$1" "$2"`
+	[ "$USR" = "$2" ] && shift
+	[ "$USR" = "/::" ] && unset USR
+	;;
+    -P*|--pass*)
+	PASS=`arg "$1" "$2"`
+	[ "$PASS" = "$2" ] && shift
+	[ "$PASS" = "/::" ] && unset PASS
+	;;
+    -s*|--server*|-host|--host*|--server*)
+	SERVER=`arg "$1" "$2"`
+	[ "$SERVER" = "$2" ] && shift
+	[ "$SERVER" = "/::" ] && unset SERVER
+	;;
+    -p*|--port*)
+	PORT=`arg "$1" "$2"`
+	[ "$PORT" = "$2" ] && shift
+	;;
+    -[45])
+        TYPE="${1#-}"
+        ;;
+    -t*|--type*)
+	TYPE=`arg "$1" "$2"`
+	[ "$TYPE" = "$2" ] && shift
+	;;
+    -l*|--local*)
+	if [ -z "$TOP" ]; then
+	  err "Discarding argument '$1' which is invalid inside of an '-n'"
+	  shift; continue
+	fi
+	NEW_LOCAL=`arg "$1" "$2"`
+	[ "$NEW_LOCAL" = "$2" ] && shift
+	[ "$NEW_LOCAL" != "/::" ] && LOCALS="$LOCALS $NEW_LOCAL"
+	;;
+    -n*|--net*|--path*)
+	if [ -z "$TOP" ]; then
+	  err "Discarding argument '$1' which cannot be nested in another '-n'"
+	  shift; continue
+	fi
+	NEW_NET=`arg "$1" "$2"`
+	[ "$NEW_NET" = "$2" ] && shift
+	[ "$NEW_NET" != "/::" ] && NETS="$NETS${NETS:+|}$NEW_NET"
+	;;
+    -r*|--remote*|--reach*)
+	if [ -n "$TOP" ]; then
+	  err "'-r remote-net' is invalid outside of a '-n'"
+	  help; exit 1
+	fi
+	NEW_REACH=`arg "$1" "$2"`
+	[ "$NEW_REACH" = "$2" ] && shift
+	[ "$NEW_REACH" != "/::" ] && REACHES="$REACHES $NEW_REACH"
+	;;
+    -f*) FALLBACK=yes ;;
+    -F*) FALLBACK=no ;;
+    -- )
+	if [ -z "$TOP" ]; then
+	  err "Discarding argument '$1' which is invalid inside of an '-n'"
+	  shift; continue
+	fi
+	break
+	;;
+    -h*|-\?*|--help ) help; exit 0 ;;
+    -[Vv]|--[Vv]*|--ver*|--change*)
+	help |sed '$!d'
+	[ "$1" = "--change${1#--change}" ] && changelog \
+	  || echo "See also \`${0##*/} --changelog'"
+	exit 0
+	;;
+    -* )
+	err "unrecognized option '$1'" \
+	    "\n`help |sed '/^Usage:/!d'`" \
+	    "\nTry \`${0##*/} --help for more information."
+	exit 1
+	;;
+    * ) break ;;
   esac
   shift
-done
+ done
+ [ -n "$TOP" ] && DO_SHIFT=$(($NUM_ARGS-$#))
+}
+
+TOP=true
+parse_args "$@"
+[ "$DO_SHIFT" -gt 0 ] 2>/dev/null && shift $DO_SHIFT
+unset TOP
+
+if [ "$TSOCKS_DEBUG" -gt 0 ] 2>/dev/null
+  then debug() { echo "$*" >${TSOCKS_DEBUG_FILE:-/dev/stderr}; }
+       debug_sed() { sed 's/^/  /' >${TSOCKS_DEBUG_FILE:-/dev/stderr}; }
+  else debug() { false; }; debug_sed() { false; }
+fi
+
+# Note, TSOCKS_LIB is *not* used by tsocks(8)
+# Is the library saved in the config?  (Note, this syntax requires a comment)
+if ! [ -r "$TSOCKS_LIB" ]; then
+  TSOCKS_LIB=`sed -e "/^#$s*library$s*=$s*/!d" -e s/// -e q "$TSOCKS_CONF_FILE"`
+  [ -r "$TSOCKS_LIB" ] && debug "read library file '$TSOCKS_LIB' from config"
+fi
+# Find the library.  Note, TSOCKS_LIB is *not* used by tsocks(8)
+if ! [ -r "$TSOCKS_LIB" ]; then
+  IFS_SAVE="$IFS"
+  IFS=:
+  for ELEMENT in $LD_LIBRARY_PATH; do
+    TSOCKS_LIB="${ELEMENT:-.}/libtsocks.so"
+    [ -r "$TSOCKS_LIB" ] && break
+  done
+  IFS="$IFS_SAVE"
+  [ -r "$TSOCKS_LIB" ] \
+    || TSOCKS_LIB=`locate -r '/libtsocks.so$' 2>/dev/null |head -n1`
+  if ! [ -r "$TSOCKS_LIB" ]; then
+    err "Can't find libtsocks.so; please install tsocks or use the '-lib' flag."
+    exit 1
+  fi
+fi
+
+debug "tsocks options parsed"
+debug "debug=$TSOCKS_DEBUG"
+
+if [ -n "$NO_CONF" ]; then
+  debug "Unsetting default and requested configuration files for '-0' argument"
+  debug "(TSOCKS_CONF_FILE is no longer set to '$TSOCKS_CONF_FILE')"
+  unset CONF
+  export TSOCKS_CONF_FILE=/dev/null
+elif [ -n "$CONF" ]; then
+  if [ -f "$CONF" -a -s "$CONF" -a -r "$CONF" ]
+    then TSOCKS_CONF_FILE = "$CONF"
+    else err "Can't read '$CONF', using default '$TSOCKS_CONF_FILE' instead."
+  fi
+  debug "Using '$TSOCKS_CONF_FILE' for TSOCKS_CONF_FILE"
+fi
+
+if [ -n "$TURN_OFF" ]; then
+  debug "Turning off tsocks preloader"
+  LD_PRELOAD=`echo -n $LD_PRELOAD |sed "s:$TSOCKS_LIB *::"`
+  if [ -n "LD_PRELOAD" ]
+    then export LD_PRELOAD; echo "export LD_PRELOAD='$LD_PRELOAD'"
+    else unset LD_PRELOAD; echo "unset LD_PRELOAD"
+  fi
+  exit 0
+fi
+
+clean_vars() {
+  if [ -z "$PORT" ] && [ "${SERVER##*:}" -gt 0 ] 2>/dev/null; then
+    PORT="${SERVER##*:}"
+    debug "Extracted port '$PORT' from specified SOCKS server '$SERVER'"
+  fi
+  SERVER="${SERVER%%:*}"
+
+  if echo "$SERVER" |grep '[^0-9.]' >/dev/null; then
+    debug "Server '$SERVER' isn't an IP address.  Converting."
+    SRV=`host "$SERVER" 2>/dev/null |sed -e '/.*has address /!d' -e 's///;q'`
+    srv_works() { ! echo "${SRV:-fail}" |grep '[^0-9.]' >/dev/null; }
+    srv_works || \
+      SRV=`dig "$SERVER" 2>/dev/null |sed -e "/.*IN${s}A$s/!d" -e "s///;q"`
+    srv_works && SERVER="$SRV"
+  fi
+
+  if [ -n "$PORT" ] && ! [ "$PORT" -gt 0 ] 2>/dev/null; then
+    err "Discarding invalid SOCKS port '$PORT'"
+    unset PORT
+  fi
+  if [ -n "${TYPE#[45]}" ]; then
+    err "Discarding invalid SOCKS type '$TYPE'"
+    unset TYPE
+  fi
+  if [ -n "$FALLBACK" ] && ! [ "$FALLBACK" = "yes" -o "$FALLBACK" = "no" ]; then
+    err "Discarding invalid fallback value '$FALLBACK'"
+    unset FALLBACK
+  fi
+}
+
+clean_vars
+
+if [ -n "$USR" ]; then
+  debug "TSOCKS_USERNAME='$USR' ${TSOCKS_USERNAME:+(it was $TSOCKS_USERNAME)}"
+  TSOCKS_USERNAME="$USR"
+fi
+if [ -n "$PASS" ]; then
+  debug "TSOCKS_PASSWORD='$PASS' ${TSOCKS_PASSWORD:+(it was $TSOCKS_PASSWORD)}"
+  TSOCKS_PASSWORD="$PASS"
+fi
+unset USR PASS
+
+
+# We have to create a temporary config file to handle some options
+if [ -n "$SERVER$PORT$TYPE$LOCALS$NETS$FALLBACK" ]; then
+  CONF_ORIG="$TSOCKS_CONF_FILE"
+  CONF_DEFS=`tempfile 2>/dev/null || mktemp 2>/dev/null || echo /tmp/ts1.$$`
+  TSOCKS_CONF_FILE=`tempfile 2>/dev/null||mktemp 2>/dev/null||echo /tmp/ts.$$`
+  trap "rm -f $CONF_DEFS $TSOCKS_CONF_FILE" 0 1 2 15  # ensure cleanup
+
+  trim() { cat "$CONF_ORIG" |sed -e 's/#.*//' -e "$@"; } # trim out comments
+  br='/{/,/}/' # match content inside brackets
+
+  echo "# library = $TSOCKS_LIB" >"$TSOCKS_CONF_FILE"
+
+  # import local networks from config
+  debug "Importing local networks:"
+  trim "${br}d" -e "/^$s*local$s*=/!d" |tee -a "$TSOCKS_CONF_FILE" \
+    |debug_sed
+  # append local networks from argument(s)
+  for NET in $LOCALS; do
+    echo "local = $NET" >>"$TSOCKS_CONF_FILE"
+    debug "added 'local = $NET' to config"
+  done
+
+  # skipping network paths until later so the defaults can get read in
+
+  CONF_SERVER=`trim "${br}d" -e "/^$s*server$s*=$s*/!d"       -e s/// -e '$!d'`
+  if [ -z "$SERVER" ]
+    then SERVER="${CONF_SERVER:-127.0.0.1}";debug "Using SOCKS server '$SERVER'"
+    else debug "Changing server from '$CONF_SERVER' to '$SERVER'"
+  fi
+
+  CONF_TYPE=`  trim "${br}d" -e "/^$s*server_type$s*=$s*/!d"  -e s/// -e '$!d'`
+  if [ -z "$TYPE" ]
+    then TYPE="${CONF_TYPE:-4}"; debug "Using SOCKS type '$TYPE'"
+    else debug "Changing type from '$CONF_TYPE' to '$TYPE'"
+  fi
+
+  CONF_PORT=`  trim "${br}d" -e "/^$s*server_port$s*=$s*/!d"  -e s/// -e '$!d'`
+  if [ -z "$PORT" ]
+    then PORT="${CONF_PORT:-1080}"; debug "Using SOCKS port '$PORT'"
+    else debug "Changing port from '$CONF_PORT' to '$PORT'"
+  fi
+
+  CONF_USER=`  trim "${br}d" -e "/^$s*default_user$s*=$s*/!d" -e s/// -e '$!d'`
+  if [ -n "$CONF_USER" ] && [ -n "$TSOCKS_USERNAME" ]
+    then debug "Specified user '$TSOCKS_USERNAME' will override '$CONF_USER'"
+  fi
+
+  CONF_PASS=`  trim "${br}d" -e "/^$s*default_pass$s*=$s*/!d" -e s/// -e '$!d'`
+  if [ -n "$CONF_PASS" ] && [ -n "$TSOCKS_PASSWORD" ]
+    then debug "Specified pass '$TSOCKS_PASSWORD' will override '$CONF_PASS'"
+  fi
+
+  CONF_FALL=`  trim "${br}d" -e "/^$s*fallback$s*=$s*/!d"     -e s/// -e '$!d'`
+  if [ -z "$FALLBACK" ] && [ -n "$CONF_FALL" ]
+    then FALLBACK="$CONF_FALL"
+    else [ -n "$FALLBACK" ] \
+           && debug "Changing fallback from '$CONF_FALL' to '$FALLBACK'"
+  fi
+
+  say_setting() { if [ -n "$2" ]; then echo "$1 = $2"; fi; }
+
+  ( # dump defaults to temp file
+    say_setting "server"	"$SERVER"
+    say_setting "server_type"	"$TYPE"
+    say_setting "server_port"	"$PORT"
+    say_setting "default_user"	"$TSOCKS_USERNAME"
+    say_setting "default_pass"	"$TSOCKS_PASSWORD"
+    say_setting "fallback"	"$FALLBACK"
+  ) >"$CONF_DEFS"
+
+  unset SERVER PORT TYPE FALLBACK
+
+  # import network paths from config
+  debug "Importing network paths:"
+  trim "$br!d" |tee -a "$TSOCKS_CONF_FILE" |debug_sed
+
+  IFS_SAVE="$IFS"
+  IFS="|" # delimit with pipes for NETS loop
+  for NET in $NETS; do
+    debug "Parsing net-conf '$NET'"
+    IFS="$IFS_SAVE" # delimit with spaces for inside this NET
+    parse_args $NET
+    clean_vars
+    if [ -z "$SERVER" -o -z "$REACHES" ]; then
+      err "A net-conf was missing a server or a remote-net.  Skipping."
+      continue
+    fi
+    unset REACH
+    (
+      echo "path {"
+      for REACH in $REACHES; do echo "reaches = $REACH"; done
+      echo "server = $SERVER"
+      [ -n "$PORT" ] && echo "server_port = $PORT"
+      [ -n "$TYPE" ] && echo "server_type = $TYPE"
+      [ -n "$FALLBACK" ] && echo "fallback = $FALLBACK"
+      echo "}"
+      echo ""
+    ) |sed 's/^[^{}]*$/\t&/' |tee -a "$TSOCKS_CONF_FILE" |debug_sed
+    IFS="|" # revert back to delimiting with pipes for NETS loop
+  done
+  IFS="$IFS_SAVE" # revert back to default delimiter
+
+  cat "$CONF_DEFS" >>"$TSOCKS_CONF_FILE"
+
+fi
+
+if [ -n "$DO_SAVE" ]; then
+  debug "Saving config to '$SAVE'"
+  ( echo "# library = $TSOCKS_LIB"
+    sed -e "/^#$s*library$s*=$s*./d" "$TSOCKS_CONF_FILE"
+  ) >"$SAVE"
+fi
+
+
+# just in case
+export TSOCKS_CONF_FILE TSOCKS_DEBUG TSOCKS_DEBUG_FILE
+export TSOCKS_USERNAME
+#export TSOCKS_PASSWORD
 
 tsocks_enable
 
+# default action (no command given) is to launch a shell
 [ $# = 0 ] && set ${SHELL:-/bin/sh}
+
+debug "will run:  exec $@"
+debug "debug statements after this one are generated by libtsocks."
+debug ""
 
 exec "$@"
