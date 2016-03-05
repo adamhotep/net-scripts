@@ -15,26 +15,24 @@
 # now we read in the command line arguments to override the above
 
 # display 1st arg when it exists and is unique, otherwise second arg and FALSE
-get_value() {
-  if [ -n "$1" ] && [ "$1" != "$2" ]
-    then echo "$1"
-    else echo "$2"; false # this return value is used below to shift arguments
-  fi
+get() {
+  [ -n "$1" ] && [ "$1" != "$2" ] && echo "$1" || echo "$2"
 }
 
 while true; do
-  case $1 in
-    --server* ) server=`get_value "${1#--server=}" "$2" || shift` ;;
-    -s* | -d* ) server=`get_value "${1#-[sd]}"  "$2" || shift` ;;
-    --port* )   cport=`get_value "${1#--port=}" "$2" || shift` ;;
-    -p* )       cport=`get_value "${1#-p}"      "$2" || shift` ;;
-    --type* )   type=`get_value "${1#--type=}"  "$2" || shift` ;;
-    -t* )       type=`get_value "${1#-t}"       "$2" || shift` ;;
-    --local* )  local=`get_value "${1#--local=}" "$2" || shift` ;;
-    -l* )       local=`get_value "${1#-l}"      "$2" || shift` ;;
-    * )         break ;;
-  esac
-  shift
+unset r
+case $1 in
+--server* ) server=`get "${1#--server=}" "$2"`; [ "$server" = "$2" ] && r=2 ;;
+-s* | -d* ) server=`get "${1#-[sd]}"     "$2"`; [ "$server" = "$2" ] && r=2 ;;
+--port* ) cport=`get "${1#--port=}"      "$2"`; [ "$cport"  = "$2" ] && r=2 ;;
+-p* )           cport=`get "${1#-p}"     "$2"`; [ "$cport"  = "$2" ] && r=2 ;;
+--type* ) type=`get "${1#--type=}"       "$2"`; [ "$type"   = "$2" ] && r=2 ;;
+-t* )           type=`get "${1#-t}"      "$2"`; [ "$type"   = "$2" ] && r=2 ;;
+--local* ) local=`get "${1#--local=}"    "$2"`; [ "$local"  = "$2" ] && r=2 ;;
+-l* )           local=`get "${1#-l}"     "$2"`; [ "$local"  = "$2" ] && r=2 ;;
+* )  break ;;
+esac
+shift $r
 done
 
 # if syntax is "server:port" then separate into server and port
