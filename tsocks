@@ -1,4 +1,5 @@
 #!/bin/sh
+# http://sourceforge.net/forum/forum.php?thread_id=1352634&forum_id=54983
 
 # read in application defaults here
 
@@ -12,6 +13,8 @@
 
 # read in user config (~/.tsocks.conf) here (overriding system defaults)
 
+
+
 # now we read in the command line arguments to override the above
 
 # display 1st arg when it exists and is unique, otherwise second arg and FALSE
@@ -23,13 +26,13 @@ while true; do
 unset r
 case $1 in
 --server* ) server=`get "${1#--server=}" "$2"`; [ "$server" = "$2" ] && r=2 ;;
--s* | -d* ) server=`get "${1#-[sd]}"     "$2"`; [ "$server" = "$2" ] && r=2 ;;
---port* ) cport=`get "${1#--port=}"      "$2"`; [ "$cport"  = "$2" ] && r=2 ;;
--p* )           cport=`get "${1#-p}"     "$2"`; [ "$cport"  = "$2" ] && r=2 ;;
---type* ) type=`get "${1#--type=}"       "$2"`; [ "$type"   = "$2" ] && r=2 ;;
--t* )           type=`get "${1#-t}"      "$2"`; [ "$type"   = "$2" ] && r=2 ;;
---local* ) local=`get "${1#--local=}"    "$2"`; [ "$local"  = "$2" ] && r=2 ;;
--l* )           local=`get "${1#-l}"     "$2"`; [ "$local"  = "$2" ] && r=2 ;;
+-s* | -d* ) server=`get "${1#-[sd]}"	 "$2"`; [ "$server" = "$2" ] && r=2 ;;
+--port* ) cport=`get "${1#--port=}"	 "$2"`; [ "$cport"  = "$2" ] && r=2 ;;
+-p* )		cport=`get "${1#-p}"	 "$2"`; [ "$cport"  = "$2" ] && r=2 ;;
+--type* ) type=`get "${1#--type=}"	 "$2"`; [ "$type"   = "$2" ] && r=2 ;;
+-t* )		type=`get "${1#-t}"	 "$2"`; [ "$type"   = "$2" ] && r=2 ;;
+--local* ) local=`get "${1#--local=}"	 "$2"`; [ "$local"  = "$2" ] && r=2 ;;
+-l* )		local=`get "${1#-l}"	 "$2"`; [ "$local"  = "$2" ] && r=2 ;;
 * )  break ;;
 esac
 shift $r
@@ -40,6 +43,7 @@ p="${server#*:}"
 server="${server%:*}"
 [ -z "$cport" ] && [ "$server" != "$p" ] && cport="$p"
 [ -n "$cport" ] && port="$cport"
+
 
 echo "server: '$server'"
 echo "port: '$port'"
