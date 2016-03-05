@@ -1,53 +1,47 @@
 #!/bin/sh
-# http://sourceforge.net/forum/forum.php?thread_id=1352634&forum_id=54983
+##########################################
+## Smart wrapper script for the tsocks(8) transparent socksification library
+## Usage:  tsocks [OPTIONS] [application [application arguments]]
+##   -on (or -off)   Add (or remove) tsocks(8) from the LD_PRELOAD variable.
+##   -show (or -sh)  Show the current value of the LD_PRELOAD variable.
+## With no arguments, tsocks creates a shell w/ LD_PRELOAD including tsocks(8)
+## 
+## Tsocks-wrapper 0.1, Copyright (C) 2009 Adam Katz <scriptsATkhopiscom>, GPLv3
+##########################################
+### 0.1 Rewritten from Debian's tsocks script by Tamas Szerb <toma@rulez.org>
+##########################################
 
-# read in application defaults here
+# Grab top double-comment lines for help:
+help() { sed -e '/^## /!d' -e 's///' "`which $0 || echo $0`"; }
 
-  # these are dummy defaults so that you can test properly
-  local=127.0.0.0/255.0.0.0
-  server=default-server
-  type=5
-  port=1080
+[ -r "$TSOCKS_LIB" ] || TSOCKS_LIB="/usr/lib/libtsocks.so"
 
-# read in default config (/etc/tsocks.conf) here (overriding app defaults)
-
-# read in user config (~/.tsocks.conf) here (overriding system defaults)
-
-
-
-# now we read in the command line arguments to override the above
-
-# display 1st arg when it exists and is unique, otherwise second arg and FALSE
-get() {
-  [ -n "$1" ] && [ "$1" != "$2" ] && echo "$1" || echo "$2"
+tsocks_enable() {
+  case $LD_PRELOAD in
+    *$TSOCKS_LIB*) true ;; # it's already enabled, so this is a no-op
+    *) export LD_PRELOAD="$TSOCKS_LIB $LD_PRELOAD" ;;
+  esac
 }
 
-while true; do
-unset r
-case $1 in
---server* ) server=`get "${1#--server=}" "$2"`; [ "$server" = "$2" ] && r=2 ;;
--s* | -d* ) server=`get "${1#-[sd]}"	 "$2"`; [ "$server" = "$2" ] && r=2 ;;
---port* ) cport=`get "${1#--port=}"	 "$2"`; [ "$cport"  = "$2" ] && r=2 ;;
--p* )		cport=`get "${1#-p}"	 "$2"`; [ "$cport"  = "$2" ] && r=2 ;;
---type* ) type=`get "${1#--type=}"	 "$2"`; [ "$type"   = "$2" ] && r=2 ;;
--t* )		type=`get "${1#-t}"	 "$2"`; [ "$type"   = "$2" ] && r=2 ;;
---local* ) local=`get "${1#--local=}"	 "$2"`; [ "$local"  = "$2" ] && r=2 ;;
--l* )		local=`get "${1#-l}"	 "$2"`; [ "$local"  = "$2" ] && r=2 ;;
-* )  break ;;
-esac
-shift $r
+tsocks_disable() {
+  LD_PRELOAD=`echo -n $LD_PRELOAD |sed "s:$TSOCKS_LIB *::"`
+  [ -n "LD_PRELOAD" ] && export LD_PRELOAD || unset LD_PRELOAD
+}
+
+while [ "x$1" = "x-${1#?}" ]; do
+  case $1 in
+    -on ) tsocks_enable; exit 0 ;;
+    -off ) tsocks_disable; exit 0 ;;
+    -show|sh) echo "LD_PRELOAD=\"$LD_PRELOAD\""; exit 0 ;;
+    -h|-?|--help ) help; exit 0 ;;
+    -- ) break ;;
+    -* ) help; exit 1 ;;
+  esac
+  shift
 done
 
-# if syntax is "server:port" then separate into server and port
-p="${server#*:}"
-server="${server%:*}"
-[ -z "$cport" ] && [ "$server" != "$p" ] && cport="$p"
-[ -n "$cport" ] && port="$cport"
+tsocks_enable
 
+[ $# = 0 ] && set ${SHELL:-/bin/sh}
 
-echo "server: '$server'"
-echo "port: '$port'"
-echo "type: '$type'"
-echo "local net: '$local'"
-echo "execute code: '$@'"
-echo "(note, execute code will actually be passed with correct quoting)"
+exec "$@"
