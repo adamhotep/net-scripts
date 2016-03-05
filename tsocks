@@ -22,7 +22,8 @@ Usage:  ${0##*/} [OPTIONS] [APP [APP ARGS]]
                    for a network range, containing -r, -s, and any of [sptuPf].
   -r remote-net    An IP/Subnet pair (like -l) for within a net-conf scope.
   APP [APP ARGS]   Full command to run with SOCKS (default=${SHELL:-/bin/sh}).
-Tsocks-wrapper 0.3, Copyright (C) 2009-10 Adam Katz <scriptsATkhopiscom>, GPLv3
+tsocks-wrapper 0.4+20150819, Copyright 2009+ by Adam Katz, GPLv2 (like tsocks)
+Part of net-scripts:  https://github.com/adamhotep/net-scripts
 /help
 }
 
@@ -30,6 +31,8 @@ changelog() { cat <</changelog
   0.1 Rewritten from Debian's tsocks script by Tamas Szerb <toma@rulez.org>
   0.2 Every option in tsocks(8) and tsocks.conf now has an argument.
       Also added -lib, -c, -0, -save, and -debug options.
+  0.3 Bugfix to support single-dash args with options but without equals
+  0.4 Better trap signals, (mostly failed attempts at) torsocks compatibility
 /changelog
 }
 
@@ -41,7 +44,7 @@ sourced or eval'd, it will set the environment for within the current shell
 powerful because it tweaks the apparent configuration file and allows
 specifying alternate files for this use.  The tools used for this purpose are
 shell environment variables and the configuration file itself.  See also
-http://sourceforge.net/forum/forum.php?thread_id=1352634&forum_id=54983
+https://sourceforge.net/p/tsocks/discussion/54983/thread/66f932a9/
 /long_desc
 }
 
@@ -52,7 +55,8 @@ err() { echo "${0##*/}: $*" >${TSOCKS_DEBUG_FILE:-/dev/stderr}; }
 if [ -z "$TSOCKS_CONF_FILE" ]; then
   TSOCKS_CONF_FILE="$HOME/.tsocks.conf"
   [ -f "$TSOCKS_CONF_FILE" -a -s "$TSOCKS_CONF_FILE" \
-    -a -r "$TSOCKS_CONF_FILE" ] || TSOCKS_CONF_FILE="/etc/tsocks.conf"
+    -a -r "$TSOCKS_CONF_FILE" ] # || TSOCKS_CONF_FILE="/etc/torsocks.conf"
+  [ -s "$TSOCKS_CONF_FILE" ] || TSOCKS_CONF_FILE="/etc/tsocks.conf"
 fi
 
 # Other defaults, which we're leaving blank or as inherited, follow:
@@ -69,8 +73,12 @@ tsocks_enable() {
 }
 
 arg() {
-  echo "$1" |sed -e "s/^--*[^=]*=/-=/" -e "s/^--.[^ ]*//" -e "s/^-.//" \
-    |grep . || echo "${2:-/::}"
+  if [ -n "$3" ] && [ "x$1" = "x$3" ]; then
+    echo "${2:-/::}"
+  else
+    echo "$1" |sed -e "s/^--*[^=]*=/-=/" -e "s/^--.[^ ]*//" -e "s/^-.//" \
+      |grep . || echo "${2:-/::}"
+  fi
 }
 
 parse_args() {
@@ -99,7 +107,7 @@ parse_args() {
 
     -d*|--debug=*)
 	[ -z "$TOP" ] && debug "declaring '$1' inside an '-n' network (huh?)"
-	TSOCKS_DEBUG=`arg "$1" "$2"`
+	TSOCKS_DEBUG=`arg "$1" "$2" "-debug"`
 	# this has an OPTIONAL argument, so we have to check for it here.
 	# we also have to ensure we aren't parsing the -0 argument.
 	if ! [ "$TSOCKS_DEBUG" != "-0" -a "$TSOCKS_DEBUG" -ge 0 ] 2>/dev/null
@@ -108,12 +116,12 @@ parse_args() {
 	fi
 	;;
 
-    -lib*|--lib*)
+    -lib|-lib*=*|--lib*)
 	if [ -z "$TOP" ]; then
 	  err "Discarding argument '$1' which is invalid inside of an '-n'"
 	  shift; continue
 	fi
-	LIB=`arg "$1" "$2"`
+	LIB=`arg "$1" "$2" "-lib"`
 	[ -r "$LIB" ] && TSOCKS_LIB="$LIB" && [ "$LIB" = "$2" ] && shift
 	;;
     -c*|--conf*=*|--with-conf-file*)
@@ -121,7 +129,7 @@ parse_args() {
 	  err "Discarding argument '$1' which is invalid inside of an '-n'"
 	  shift; continue
 	fi
-	CONF=`arg "$1" "$2"`
+	CONF=`arg "$1" "$2" "-conf"`
 	[ "$CONF" = "$2" ] && shift
 	;;
     -0|--0)
@@ -131,38 +139,38 @@ parse_args() {
 	fi
 	NO_CONF=true
 	;;
-    -save*|--save*)
+    -save|-save*=*|--save*)
 	if [ -z "$TOP" ]; then
 	  err "Discarding argument '$1' which is invalid inside of an '-n'"
 	  shift; continue
 	fi
-	SAVE=`arg "$1" "$2"`
+	SAVE=`arg "$1" "$2" "-save"`
 	touch "$SAVE" && DO_SAVE=true && [ "$SAVE" = "$2" ] && shift
 	;;
     -u*|--user*)
-	USR=`arg "$1" "$2"`
+	USR=`arg "$1" "$2" -user`
 	[ "$USR" = "$2" ] && shift
 	[ "$USR" = "/::" ] && unset USR
 	;;
-    -P*|--pass*)
-	PASS=`arg "$1" "$2"`
+    -P*|-pass|-pass*=*|--pass*)
+	PASS=`arg "$1" "$2" -pass`
 	[ "$PASS" = "$2" ] && shift
 	[ "$PASS" = "/::" ] && unset PASS
 	;;
     -s*|--server*|-host|--host*|--server*)
-	SERVER=`arg "$1" "$2"`
+	SERVER=`arg "$1" "$2" -server`
 	[ "$SERVER" = "$2" ] && shift
 	[ "$SERVER" = "/::" ] && unset SERVER
 	;;
     -p*|--port*)
-	PORT=`arg "$1" "$2"`
+	PORT=`arg "$1" "$2" -port`
 	[ "$PORT" = "$2" ] && shift
 	;;
     -[45])
         TYPE="${1#-}"
         ;;
     -t*|--type*)
-	TYPE=`arg "$1" "$2"`
+	TYPE=`arg "$1" "$2" -type`
 	[ "$TYPE" = "$2" ] && shift
 	;;
     -l*|--local*)
@@ -170,7 +178,7 @@ parse_args() {
 	  err "Discarding argument '$1' which is invalid inside of an '-n'"
 	  shift; continue
 	fi
-	NEW_LOCAL=`arg "$1" "$2"`
+	NEW_LOCAL=`arg "$1" "$2" -local`
 	[ "$NEW_LOCAL" = "$2" ] && shift
 	[ "$NEW_LOCAL" != "/::" ] && LOCALS="$LOCALS $NEW_LOCAL"
 	;;
@@ -179,7 +187,7 @@ parse_args() {
 	  err "Discarding argument '$1' which cannot be nested in another '-n'"
 	  shift; continue
 	fi
-	NEW_NET=`arg "$1" "$2"`
+	NEW_NET=`arg "$1" "$2" -net`
 	[ "$NEW_NET" = "$2" ] && shift
 	[ "$NEW_NET" != "/::" ] && NETS="$NETS${NETS:+|}$NEW_NET"
 	;;
@@ -188,7 +196,7 @@ parse_args() {
 	  err "'-r remote-net' is invalid outside of a '-n'"
 	  help; exit 1
 	fi
-	NEW_REACH=`arg "$1" "$2"`
+	NEW_REACH=`arg "$1" "$2" -remote`
 	[ "$NEW_REACH" = "$2" ] && shift
 	[ "$NEW_REACH" != "/::" ] && REACHES="$REACHES $NEW_REACH"
 	;;
@@ -238,6 +246,14 @@ if ! [ -r "$TSOCKS_LIB" ]; then
   TSOCKS_LIB=`sed -e "/^#$s*library$s*=$s*/!d" -e s/// -e q "$TSOCKS_CONF_FILE"`
   [ -r "$TSOCKS_LIB" ] && debug "read library file '$TSOCKS_LIB' from config"
 fi
+
+# Torsocks does not work with standard SOCKS servers due to its DNS
+# Is torsocks available?  That project is still being maintained.
+#TORSOCKS="/usr/lib/torsocks/libtorsocks.so"
+#if ! [ -r "$TSOCKS_LIB" ] && [ -s "$TORSOCKS" ]; then
+#  TSOCKS_LIB="$TORSOCKS"
+#fi
+
 # Find the library.  Note, TSOCKS_LIB is *not* used by tsocks(8)
 if ! [ -r "$TSOCKS_LIB" ]; then
   IFS_SAVE="$IFS"
@@ -257,6 +273,7 @@ fi
 
 debug "tsocks options parsed"
 debug "debug=$TSOCKS_DEBUG"
+debug "library=$TSOCKS_LIB"
 
 if [ -n "$NO_CONF" ]; then
   debug "Unsetting default and requested configuration files for '-0' argument"
@@ -265,7 +282,7 @@ if [ -n "$NO_CONF" ]; then
   export TSOCKS_CONF_FILE=/dev/null
 elif [ -n "$CONF" ]; then
   if [ -f "$CONF" -a -s "$CONF" -a -r "$CONF" ]
-    then TSOCKS_CONF_FILE = "$CONF"
+    then TSOCKS_CONF_FILE="$CONF"
     else err "Can't read '$CONF', using default '$TSOCKS_CONF_FILE' instead."
   fi
   debug "Using '$TSOCKS_CONF_FILE' for TSOCKS_CONF_FILE"
@@ -327,9 +344,11 @@ unset USR PASS
 # We have to create a temporary config file to handle some options
 if [ -n "$SERVER$PORT$TYPE$LOCALS$NETS$FALLBACK" ]; then
   CONF_ORIG="$TSOCKS_CONF_FILE"
-  CONF_DEFS=`tempfile 2>/dev/null || mktemp 2>/dev/null || echo /tmp/ts1.$$`
-  TSOCKS_CONF_FILE=`tempfile 2>/dev/null||mktemp 2>/dev/null||echo /tmp/ts.$$`
-  trap "rm -f $CONF_DEFS $TSOCKS_CONF_FILE" 0 1 2 15  # ensure cleanup
+  mktmp() { mktemp 2>/dev/null || echo /tmp/ts$1.$$; }
+  CONF_DEFS=`mktmp 1`
+  TSOCKS_CONF_FILE=`mktmp 2`
+  SIGNALS="0 1 2 9 11 15 TSTP"
+  trap "rm -f $CONF_DEFS $TSOCKS_CONF_FILE" $SIGNALS  # cleanup
 
   trim() { cat "$CONF_ORIG" |sed -e 's/#.*//' -e "$@"; } # trim out comments
   br='/{/,/}/' # match content inside brackets
@@ -356,7 +375,7 @@ if [ -n "$SERVER$PORT$TYPE$LOCALS$NETS$FALLBACK" ]; then
 
   CONF_TYPE=`  trim "${br}d" -e "/^$s*server_type$s*=$s*/!d"  -e s/// -e '$!d'`
   if [ -z "$TYPE" ]
-    then TYPE="${CONF_TYPE:-4}"; debug "Using SOCKS type '$TYPE'"
+    then TYPE="${CONF_TYPE:-5}"; debug "Using SOCKS type '$TYPE'"
     else debug "Changing type from '$CONF_TYPE' to '$TYPE'"
   fi
 
@@ -451,5 +470,10 @@ tsocks_enable
 debug "will run:  exec $@"
 debug "debug statements after this one are generated by libtsocks."
 debug ""
+
+# if there are signals to clean up (and therefore temp files to remove)
+if [ -n "$SIGNALS" ]; then
+  (sleep 1 && rm -f $CONF_DEFS $TSOCKS_CONF_FILE && trap - $SIGNALS) &
+fi
 
 exec "$@"
