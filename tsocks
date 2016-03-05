@@ -1,0 +1,51 @@
+#!/bin/sh
+
+# read in application defaults here
+
+  # these are dummy defaults so that you can test properly
+  local=127.0.0.0/255.0.0.0
+  server=default-server
+  type=5
+  port=1080
+
+# read in default config (/etc/tsocks.conf) here (overriding app defaults)
+
+# read in user config (~/.tsocks.conf) here (overriding system defaults)
+
+# now we read in the command line arguments to override the above
+
+# display 1st arg when it exists and is unique, otherwise second arg and FALSE
+get_value() {
+  if [ -n "$1" ] && [ "$1" != "$2" ]
+    then echo "$1"
+    else echo "$2"; false # this return value is used below to shift arguments
+  fi
+}
+
+while true; do
+  case $1 in
+    --server* ) server=`get_value "${1#--server=}" "$2" || shift` ;;
+    -s* | -d* ) server=`get_value "${1#-[sd]}"  "$2" || shift` ;;
+    --port* )   cport=`get_value "${1#--port=}" "$2" || shift` ;;
+    -p* )       cport=`get_value "${1#-p}"      "$2" || shift` ;;
+    --type* )   type=`get_value "${1#--type=}"  "$2" || shift` ;;
+    -t* )       type=`get_value "${1#-t}"       "$2" || shift` ;;
+    --local* )  local=`get_value "${1#--local=}" "$2" || shift` ;;
+    -l* )       local=`get_value "${1#-l}"      "$2" || shift` ;;
+    * )         break ;;
+  esac
+  shift
+done
+
+# if syntax is "server:port" then separate into server and port
+p="${server#*:}"
+server="${server%:*}"
+[ -z "$cport" ] && [ "$server" != "$p" ] && cport="$p"
+[ -n "$cport" ] && port="$cport"
+
+echo "server: '$server'"
+echo "port: '$port'"
+echo "type: '$type'"
+echo "local net: '$local'"
+echo "execute code: '$@'"
+echo "(note, execute code will actually be passed with correct quoting)"

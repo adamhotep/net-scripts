@@ -1,0 +1,73 @@
+#!/bin/sh
+help() { cat <</help
+Test an IP or domain name for web service, return false if connection(s) fail
+Usage: poke [-av] target[:port] [target[:port] ...]
+  -a      Report all failures instead of quitting after first (takes longer)
+  -v      Verbose mode.  Reports success or failure (only first failure)
+  -2      Run again after 30s and report only target(s) that fail twice
+  target  Any IP address or domain name, like 192.168.0.1 or www.google.com
+  port    Port to probe (defaults to 80, http)
+
+poke 0.7, Copyright 2005+ by Adam Katz, GPLv2+
+Part of net-scripts:  https://github.com/adamhotep/net-scripts
+/help
+}
+
+PORT=80
+say=true
+ALL() { false; }
+filter() { echo "$*"; }
+we_have() { type "$@" >/dev/null 2>&1; }
+
+if we_have ncat 	# ncat (comes with nmap v5+) allows wait in ms
+  then probe() { ncat --send-only --recv-only -w 334ms $1 $2 >/dev/null 2>&1; }
+elif we_have nc 	# netcat; almost every system has this
+  then probe() { nc -zw1 $1 $2 >/dev/null 2>&1; }
+elif we_have nmap
+  then probe() { nmap -p$2 -P0 -sT $1 2>&1 |grep "^$2.*open" >/dev/null; }
+elif we_have telnet
+  then probe() { echo X |telnet -e X $1 $2 >/dev/null 2>&1; }
+else
+  echo "ERROR: Missing ncat, nc (netcat), nmap, and even telnet!" >&2; exit 127
+fi
+
+while [ -n "$1" ]; do
+ case $1 in
+  -2* | -a*2* )	shift; say=true;
+  		set placeholder -a "$@" --pause "$@" # do it twice!
+  		# filter for dups only; anything that fails only once is okay
+  		filter() { echo "$*" |sed 's/ /\n/g' |sort |uniq -d; } ;;
+  --pause* )	sleep 3 ;;
+  -va* | -av*)	shift; set placeholder -v -a "$@" ;;
+  -v* | --v* )	say=echo ;;
+  -a* | --a* )	ALL() { [ $# -gt 0 ] && date "+%Y%m%d %H:%M:%S $*"; true; } ;;
+  -h* | --h* )	help; exit 0 ;;
+  -*  | --*  )	echo "poke: invalid argument \`$1'" >&2
+ 		help|grep ^Usage; exit 2 ;;
+  * ) 		P="${1#*:}"
+ 		[ "$P" = "$1" ] || PORT="$P"
+ 		TARGET="${1%%:*}"
+ 		if probe "$TARGET" "$PORT"; then
+ 		  hits="$hits $TARGET:$PORT"
+ 		  ALL && $say "poke: successfully connected to $TARGET:$PORT"
+ 		else
+ 		  misses="$misses $TARGET:$PORT"
+ 		  $say "poke: could not connect to port $PORT on $TARGET" 
+ 		  (! ALL) && exit 1
+ 		fi ;;
+ esac
+ shift
+done
+
+if [ -z "$hits$misses" ]; then 
+  echo "poke: too few arguments" >&2
+  echo "Try \`poke --help' for more information." >&2
+  exit 2
+fi
+
+(! ALL) && $say "poke: successfully connected to each of: $hits"
+
+misses=`filter $misses`
+[ -n "$misses" ] && ALL "poke: failed to connect to: $misses" \
+  && exit 1 || exit 0
+

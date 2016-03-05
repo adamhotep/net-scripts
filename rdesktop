@@ -1,0 +1,236 @@
+#!/bin/bash
+##########################################
+## rdesktop-wrapper
+## This is a wrapper around rdesktop to handle ssh tunnels and a nickname index
+## 
+## * You can specify a tunneled host as if it were in your local network
+## * You can specify a host mapped in your ~/.rdesktop_table file
+## * You can specify user accounts as part of the hostname, like user@host
+## * Three new options:  --list-maps, --map-help, --completion-help
+## * You can have entries in '~/.rdesktop_table' like:
+##     #title  	[user@]server[:port]	# default port=3389, user=$USER
+##     hannibal	localhost:13389
+##     scipio 	adam@scipio
+## * If you use alternate remote desktop ports in your ssh tunnels, you can
+##   put a comment that says "rdesktop" above it.  Say "rdesktop next 4" to
+##   indicate that the next four nonwhitespace lines are remote desktop tunnels.
+## 
+## v0.6, Copyright (c) 2006-2010 by Adam Katz, GPLv2+
+## Part of net-scripts:  https://github.com/adamhotep/net-scripts
+## 
+##########################################
+### 0.1 Initial alpha-release; stable for ME, used more than daily.
+###     Rather messy code, known bug with spaced arguments, needs rehaul,
+###     and the inclusion of perl is silly (but more reliable than sed -r).
+### 0.2 Better help
+### 0.3 Fixed bug with more than one tunnel per host in ssh_config, zsh comp fix
+### 0.4 Fixed nmap bug, there are likely more...
+### 0.5 Now using bash for arrays so this works with quoted (spaced) parameters
+### 0.6 Rewrote ssh_config parser, allow ssh_config comment hint
+### You can debug this by setting $DEBUG to "true" before running this script
+##########################################
+### TODO
+###   * Rewrite the whole thing in perl (lots of work; it works fine as is...)
+###   * Reconsider blanket exclusion of wildcard hosts in sshd_config
+###   * Test to see if connected to a host before okaying its ssh tunnels
+###   * Get somebody to say they use and like this script
+##########################################
+
+help() { sed -e '/^## /!d' -e 's///' "`which $0 || echo $0`"; }
+
+completion_help() { echo \
+'For hosts tab completion in zsh, add these lines to your .zshrc:
+ function _get_rdesktops() {
+  reply=(`
+    rdesktop --list-maps 2>/dev/null |sed -r "s/^port.*maps ([^:]+):.*ough/\1/"
+    _get_hosts
+  `)
+ }
+ compctl -K _get_rdesktops rdesktop'
+}
+
+lookup_table=~/.rdesktop_table
+[ -n "$DEBUG" ] && debug() { echo "$*" >&2; } || debug() { true; }
+
+# get list of maps from lookup table file
+get_lookups() {
+  [ -s "$lookup_table" ] && \
+    perl -ne 's/\W*#.*//; s/^(\S+)\s+/$1   \t/s; print if /./;' <"$lookup_table"
+}
+
+# get list of ssh tunnels for port 3389 (and my alt, 33389) from ~/.ssh/config
+get_tunnels() {
+  perl -e '
+    sub report_tunnel {
+      my ($forward, $target, $host) = @_;
+      while ( length($forward) < 8 ) { $forward .= " "; }
+      $target =~ s/:3389$//;
+      while ( length($target) < 30 ) { $target .= " "; }
+      print "port $forward maps $target through $host\n";
+    }
+
+    open (SSH_CONFIG, "< $ENV{HOME}/.ssh/config") or die $!;
+    while (<SSH_CONFIG>) {
+      chomp;
+      next unless /Host\s+([^*]+)$/;
+      my $host = $1;
+      do {
+        $_ = <SSH_CONFIG>;
+        last if ! defined;
+        if (/#.*\brdesktop\s*(?:(?:next\s*)?(\d+\b))?/) {
+          my $n = 1;
+          $n = $1 if ( defined($1) && $1 > 1 );
+          for (1; $n > 0; $n--) {
+            $_ = <SSH_CONFIG>;
+            last if ! defined;
+            s/#.*$//;
+            $_ = <SSH_CONFIG> if (/^\s*$/);
+            last if ! defined || ! /LocalForward\s+((?:\S*:)?\d+)\s+(\S+)/;
+            report_tunnel ($1, $2, $host);
+          }
+        }
+        if (/LocalForward(?:\s+|\s*=\s*)((?:\S*:)?\d+)\s+(\S+:3?3389\d*)\b/) {
+          report_tunnel ($1, $2, $host);
+        }
+      } while (! /Host\s/);
+    }
+    close (SSH_CONFIG);
+  '
+}
+
+# just show the list and exit
+case x$*${args[*]} in
+  *-completion* ) completion_help; exit 0;;
+  *--map-help*  ) help; exit 0;;
+  *--????-maps* ) get_lookups; get_tunnels; exit 0;;
+  *--tunneltest*) get_tunnels; exit 0;;
+  *-h*          ) help=true ;;
+esac
+
+# list order in path, like 'which -a' w/out aliases
+scanpath() {
+  for d in `echo $PATH |sed 's/:/ /g'`; do ls "$d/$1" 2>/dev/null; done
+}
+
+debug "finding 'rdesktop' in path"
+[ -n "`echo $0 |grep /`" ] && apath="$0" && aline=1 || aline=2
+run=`scanpath rdesktop |grep -v "^$apath$" |sed "${aline}q;d"`
+[ -z "$run" ] && echo "No rdesktop executable found in path" <&2 && exit 2
+debug "we will use the second hit in the path, which is '$run'"
+
+if [ -n "$help" ]; then
+  help; echo ''; $run -h; exit 0
+fi
+
+# throw all but last argument into $args array
+while [ -n "$2" ]; do
+  # can't have -g and -A, so nix the -g (it doesn't make any sense anyway)
+  echo "x$*"|grep ".-A" >/dev/null && [ "$1" != "${1#-g}" ] && shift && continue
+  args[${i:-1}]="$1"
+  i=$(($i+1))
+  shift
+done
+
+rd=`echo $1 |sed 's/^.*@//'`
+user=`echo $1 |sed -e "/@/!d" -e "s/@$rd$//" -e "s/^/-u /"`
+#user=`echo $1 |perl -ne 'if /\@/ { s/^([^@]+)\@.*$/-u $1/; print; }'`
+local=`echo $1 |perl -ne 'print if /\b(127\.0\.[0-9.]+|localhost.*)/'`
+[ -n "$local" ] && [ -z "`echo $local|grep :`" ] && local="$local:3389"
+
+# try lookup table
+if [ -s "$lookup_table" ]; then
+  table=`get_lookups |perl -ne "print if /^\S*$rd\b/"`
+  debug "lookup table has data, host '$rd' best match is '$table'"
+fi
+
+# try ssh config (but not if we are local!)
+if [ -z "$table" ]; then
+  debug "no match on table lookup, trying to search for '$rd' in ssh conf"
+
+  if [ -n "$local" ]; then
+    port=`echo $local|sed 's/^.*://'` # we already set the default port above
+  else
+    port=`get_tunnels |perl -ne \
+      "if (/\b$rd\b/) "'{ s/^\S+\s(\d+).*$/$1/; print; }'`
+  fi
+
+  [ -n "$port" ] && title=`get_tunnels |perl -ne \
+  "if (/port $port\\b.*\\b$rd\\b/)
+    { s/^.*maps\s//; s/[\t ]+/-/g; s/-$//; s/:3?3389//g; print; }"`
+
+  [ -n "$title" ] && table="$title localhost:$port" \
+    && debug "found ssh-tunnel titled '$title' matching '$rd'" \
+    || debug "no ssh tunnel matches query '$rd'"
+
+fi
+
+# try the host literally
+if [ -z "$table" ]; then
+  debug "no match on ssh conf, testing if '$rd' is a literal host or host:port"
+  host=`echo $rd |sed "s/:.*$//"`
+  port=`echo $rd |sed "s/$host:*//"`
+  [ -z "$port" ] && port=3389
+  debug "  testing $host:$port"
+
+  # nmap with timeouts (version 4+) is awesome!  ... why doens't 2s work!?
+  my_nmap() {
+    $tsocks nmap -P0 -sT -T4 --host-timeout 1501 -p"$1" "$2" 2>&1 |grep "$3";
+  }
+  # fall back to telnet if nmap doesn't report on the requested port
+  if my_nmap 25 localhost '^25/' >/dev/null
+    then
+      p=`my_nmap $port $host "^$port.*open"`
+      if [ -z "$p" ]; then
+        tsocks=tsocks && p=`my_nmap $port $host "^$port.*open"`
+        [ -z "$p" ] && unset tsocks || echo "works with tsocks"
+      fi
+      [ -n "$p" ] && go=true
+    else echo X |telnet -e X "$1" $2 >/dev/null 2>&1 && go=true
+  fi
+  [ -n "$go" ] && table="$rd $host:$port" && debug "literal works, using '$rd'"
+fi
+
+if [ -z "$table" ]; then
+  debug "still nothing ... is '$rd' an argument?"
+  case $rd in
+    # no host, let real rdesktop give errors/help
+    -*) $run "${args[@]}" $rd; exit $? ;;
+  esac
+
+  debug "not an argument ... spit out error message"
+  echo "`basename $0`: could not connect to \`$rd'"
+  [ -s "$lookup_table" ] && match=" match in the" \
+                         || map_help="- see `basename $0` --map-help"
+  echo "
+Found no$match lookup table at \`$lookup_table' $map_help
+Found no match in your ssh config for a tunneled rdesktop port (3389)
+Server \`$host' does not appear to accept TCP connections on port \`$port'
+Trying ping..."
+  ping -n -c3 "$host" 2>/dev/null
+
+exit 2
+fi
+
+if [[ -z "$tsocks" && "$table" =~ (10\.0\.101\.[0-9]+|\.bf)(:[0-9]+)?$ ]]; then
+  tsocks=tsocks
+  debug "tsocks enabled for table '$table'"
+fi
+
+[ -z "$user" ] && [ -n "`echo $table|grep '@'`" ] && \
+  user=`echo $table |perl -pne 's/^.*\b([^\@]+)\@.*$/-u $1/'` # extract username
+[ -n "$user" ] && debug "a username will be specified with '$user'"
+
+table=`echo $table |perl -pne 's/\s[^\@]+\@/ /'` # remove username form table
+
+dbrun="$tsocks $run ${args[@]} $user -T $table"
+#debug "running '$dbrun'..."
+if debug is-on 2>&1 |grep is-on >/dev/null; then
+  debug "running:  '$run \\"
+  for a in "${args[@]}"; do debug "    \"$a\" \\"; done
+  debug "    $user \\"
+  debug "    -T $table"
+fi
+$tsocks $run "${args[@]}" $user -T $table
+RETVAL=$?
+[ $RETVAL != 0 ] && debug "command '$dbrun' failed with exit code '$RETVAL'" >&2
+exit $RETVAL

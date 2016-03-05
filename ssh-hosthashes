@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+# Lists known SSH hosts by server public key hash, with line number,
+# from ~/.ssh/known_hosts or a given file.
+#
+# v0.2+20120404 Copyright 2010+ by Adam Katz, BSD 2-clause (like OpenSSH)
+# Part of net-scripts:  https://github.com/adamhotep/net-scripts
+
+use warnings;
+use strict;
+
+# to do this in /bin/sh (MUCH slower):
+# eval `resize 2>/dev/null`; for hash in `sed -r '/.* ssh-[^ ]* /!d; s///' known_hosts |sort |uniq -d`; do echo "$hash" |sed -r "s/^(.{${COLUMNS:=80}}).{4,}(.{$(($COLUMNS-3))})$/\n\1...\2/"; grep "$hash" ~/.ssh/known_hosts |sed 's/ ssh-... .*//; s/^/\t/'; done
+
+# filename, dash for standard input, or default to using ~/.ssh/known_hosts
+if (defined($ARGV[0])) {
+  if ($ARGV[0] =~ /^-$/) { open (KNOWN_HOSTS, "cat |") or die $!; }
+  else { open (KNOWN_HOSTS, $ARGV[0]) or die $!; }
+} else { open (KNOWN_HOSTS, "< $ENV{HOME}/.ssh/known_hosts") or die $!; }
+
+my %hash = ();
+
+while (<KNOWN_HOSTS>) {
+  next unless /^(.+) (ssh-\S+\s.+)/;
+  $hash{$2} .= "$.: $1\n\t";
+}
+
+my $col = 80;
+if ( defined($ENV{COLUMNS}) ) { $col = $ENV{COLUMNS}; }
+elsif (open (RESIZE, "resize 2>/dev/null |") ) {
+  while (<RESIZE>) { next unless /COLUMNS=(\d+)/; $col = $1; last; }
+  close (RESIZE);
+}
+$col -= 3;
+
+foreach (keys %hash) {
+  next unless $hash{$_} =~ /\n../;
+  my $host = $hash{$_};
+  s/^(.{$col}...).{4,}(.{$col})$/$1...$2/;
+  print "$_\n\t$host\n";
+}

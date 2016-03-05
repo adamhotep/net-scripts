@@ -1,0 +1,64 @@
+#!/usr/bin/perl
+=head1 NAME
+
+cidr2regex - Convert IPs, with or without CIDRs, to a single Regular Expression
+
+=head1 SYNOPSIS
+
+Arguments are assumed to be files.  No options are currently supported.  To
+convert CIDRs as a quick one-liner, pipe this from echo, e.g.
+
+    echo 1.2.3.4/18 5.6.7.8/27 |cidr2regex
+or
+    cidr2regex <<< "1.2.3.4/14 127/8"
+
+This script requires perl modules Regexp::Assemble and Net::CIDR.
+
+cidr2regex v0.3+20120309 Copyright (c) 2010+ by Adam Katz, 2-clause BSD license
+
+=head1 AUTHORS
+
+Adam Katz E<lt>https://github.com/adamhotep/net-scriptsE<gt>
+
+=cut
+
+use strict;
+use warnings;
+
+if ( $ARGV[0] && $ARGV[0] =~ /^--?h/ ) {
+  use Pod::Usage "pod2usage";
+  pod2usage({-verbose=>2, -exitval=>0, -output=>\*STDOUT});
+  exit;
+}
+
+use Regexp::Assemble;
+use Net::CIDR "cidr2octets";
+
+
+my @cidrs = ();
+my $re = Regexp::Assemble->new(anchor_word => 1);
+
+my $octet = '(?:2(?:5[0-5]|[0-4]\d)|1?\d?\d)';
+
+while(<>) {
+  while(/.*?(?!<[.\/])\b($octet(?:(?:\.$octet){3}|(?:\.$octet){0,3}(?=\/[0-3]?\d\b)))(\/[0-3]?\d)?\b(?![.\/])/g) {
+    push (@cidrs, $1 . ($2 or "/32")); # support bare IPs
+  }
+}
+
+exit 1 if not @cidrs;
+$octet = ".$octet";
+
+foreach ( Net::CIDR::cidr2octets(@cidrs) ) {
+  my ($a, $b, $c, $d) = /^(\d+)(\.\d+)?(\.\d+)?(\.\d+)?$/;
+  # cidr2octets will truncate, e.g. 10.0.0.0/8 => 10, so we have to un-truncate
+  $b ||= $octet;
+  $c ||= $octet;
+  $d ||= $octet;
+  $re->add( sprintf("%s\\%s\\%s\\%s", $a, $b, $c, $d) );
+}
+
+#$re =~ s/^\(\?-xism:(.*)\)$/(?:$1)/;
+
+print $re->as_string. "\n";
+
