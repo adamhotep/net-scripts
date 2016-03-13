@@ -37,7 +37,7 @@ while [ "$1" != "${1#-}" ]; do
     ( -S* )		SERVER="${1#-S}" ;;
     ( --server=?* )	SERVER="${1#--server=}" ;;
     ( -- )		shift; break ;;
-    ( --type )		check_arg "$@"; OPTS="$OPTS -t $2" ;;
+    ( --type )		check_arg "$@"; OPTS="$OPTS -t $2"; shift ;;
     ( --type=?* )	OPTS="$OPTS -t ${1#--type=}" ;;
     ( -[cNtWRm] )	OPTS="$OPTS $1 $2"; shift ;; # all opts requiring args
     ( -[cNtWRm]* | -? )	OPTS="$OPTS $1" ;; # opt WITH arg or single opt w/o args
