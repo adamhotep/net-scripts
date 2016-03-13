@@ -1,12 +1,35 @@
 #!/usr/bin/perl
-# Lists known SSH hosts by server public key hash, with line number,
-# from ~/.ssh/known_hosts or a given file.
-#
-# v0.2+20120404 Copyright 2010+ by Adam Katz, BSD 2-clause (like OpenSSH)
-# Part of net-scripts:  https://github.com/adamhotep/net-scripts
+=head1 NAME
+
+ssh-hosthashes - List duplicate entries in ~/.ssh/known_hosts by pubkey
+
+=head1 SYNOPSIS
+
+This will display a list of SSH hosts arranged in clusters by public key
+hash, including line numbers for each entry. You can then consolidate these
+entries by comma-separating them on the same line.
+
+Arguments are assumed to be file(s) to scan. No options are currently
+supported. You can alternatively pipe a known_hosts equivalent to
+ssh-hosthashes, e.g.
+
+    sudo cat /home/some_user/.ssh/known_hosts |ssh-hosthashes
+
+ssh-hosthashes v0.2+20160306 Copyright 2010+ by Adam Katz, 2-clause BSD
+
+=head1 AUTHORS
+
+Adam Katz E<lt>https://github.com/adamhotep/net-scriptsE<gt>
+
+=cut
 
 use warnings;
 use strict;
+
+if ( $ARGV[0] && $ARGV[0] =~ /^--?h/ ) {
+  use Pod::Usage "pod2usage";
+  pod2usage({-verbose=>2, -exitval=>0, -output=>\*STDOUT});
+}
 
 # to do this in /bin/sh (MUCH slower):
 # eval `resize 2>/dev/null`; for hash in `sed -r '/.* ssh-[^ ]* /!d; s///' known_hosts |sort |uniq -d`; do echo "$hash" |sed -r "s/^(.{${COLUMNS:=80}}).{4,}(.{$(($COLUMNS-3))})$/\n\1...\2/"; grep "$hash" ~/.ssh/known_hosts |sed 's/ ssh-... .*//; s/^/\t/'; done
