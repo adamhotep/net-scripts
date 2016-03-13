@@ -15,7 +15,7 @@ ssh-hosthashes, e.g.
 
     sudo cat /home/some_user/.ssh/known_hosts |ssh-hosthashes
 
-ssh-hosthashes v0.2+20160306 Copyright 2010+ by Adam Katz, 2-clause BSD
+ssh-hosthashes v0.2+20160312 Copyright 2010+ by Adam Katz, 2-clause BSD
 
 =head1 AUTHORS
 
@@ -30,9 +30,6 @@ if ( $ARGV[0] && $ARGV[0] =~ /^--?h/ ) {
   use Pod::Usage "pod2usage";
   pod2usage({-verbose=>2, -exitval=>0, -output=>\*STDOUT});
 }
-
-# to do this in /bin/sh (MUCH slower):
-# eval `resize 2>/dev/null`; for hash in `sed -r '/.* ssh-[^ ]* /!d; s///' known_hosts |sort |uniq -d`; do echo "$hash" |sed -r "s/^(.{${COLUMNS:=80}}).{4,}(.{$(($COLUMNS-3))})$/\n\1...\2/"; grep "$hash" ~/.ssh/known_hosts |sed 's/ ssh-... .*//; s/^/\t/'; done
 
 # filename, dash for standard input, or default to using ~/.ssh/known_hosts
 if (defined($ARGV[0])) {
