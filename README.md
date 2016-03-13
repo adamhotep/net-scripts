@@ -19,12 +19,12 @@ A wrapper around `host` that accepts any number of hosts to look up (the DNS ser
 
 ## poke
 
-Quick "is it running" test that runs on TCP rather than ICMP (ping).  Defaults to checking port 80 (HTTP).
+Quick "is it running" test that runs on [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol "Transmission Control Protocol") rather than [ICMP](https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol "Internet Control Message Protocol") (ping).  Defaults to checking port 80 ([HTTP](https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol "Hypertext Transfer Protocol")).
 
 
 ## rdesktop
 
-A wrapper around `rdesktop` that can handle SSH tunnels and a nickname index.
+A wrapper around [`rdesktop`](https://github.com/rdesktop/rdesktop) that can handle SSH tunnels and a nickname index.
 
 I do not use this any more and may not be able to support issues that crop up.  The code is old and crufty because I have not maintained it in years.  This may change if I gain a need for regular access to a Windows box.
 
@@ -36,6 +36,6 @@ List duplicate entries in your `~/.ssh/known_hosts` file as found by the server'
 
 ## tsocks
 
-This is a drop-in replacement for the old `tsocks` wrapper script that allows you to shove another program through a SOCKS proxy whether it wants to or not.  Unlike the original `tsocks` script, this supports tons of options that you'd otherwise need a configuration file for.
+This is a drop-in replacement for the old [`tsocks`](http://tsocks.sourceforge.net/) wrapper script that allows you to shove another program through a SOCKS proxy whether it wants to or not.  Unlike the original `tsocks` script, this supports tons of options that you'd otherwise need a configuration file for. (The [Debian version of tsocks](https://tracker.debian.org/pkg/tsocks) has a [tsocks github repository](https://github.com/TamasSzerb/tsocks).)
 
 
