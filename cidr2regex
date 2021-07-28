@@ -14,7 +14,7 @@ or
 
 This script requires perl modules Regexp::Assemble and Net::CIDR.
 
-cidr2regex v0.3+20120309 Copyright (c) 2010+ by Adam Katz, 2-clause BSD license
+cidr2regex v0.3.20180708 Copyright (c) 2010+ by Adam Katz, 2-clause BSD license
 
 =head1 AUTHORS
 
@@ -50,12 +50,13 @@ exit 1 if not @cidrs;
 $octet = ".$octet";
 
 foreach ( Net::CIDR::cidr2octets(@cidrs) ) {
-  my ($a, $b, $c, $d) = /^(\d+)(\.\d+)?(\.\d+)?(\.\d+)?$/;
   # cidr2octets will truncate, e.g. 10.0.0.0/8 => 10, so we have to un-truncate
+  my ($a, $b, $c, $d) = /^(\d+)(\.\d+)?(\.\d+)?(\.\d+)?$/;
+  next unless $a;
   $b ||= $octet;
   $c ||= $octet;
   $d ||= $octet;
-  $re->add( sprintf("%s\\%s\\%s\\%s", $a, $b, $c, $d) );
+  $re->add( sprintf('%s\%s\%s\%s', $a, $b, $c, $d) );
 }
 
 #$re =~ s/^\(\?-xism:(.*)\)$/(?:$1)/;

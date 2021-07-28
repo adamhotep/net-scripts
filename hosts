@@ -1,20 +1,21 @@
 #!/bin/sh
 help() {
-  echo "Query multiple hosts at the same time"
+  #echo "Query multiple hosts at the same time"
   #echo "Usage: hosts [-S SERVER] [HOST_OPTIONS] HOST [HOST...]"
-  host -h 2>&1 |sed -e 1d -e '2 { s/host/hosts/ }' \
-                    -e '3 { s/^/ /; s/ hostname.*/ [-S server ] hostname/ }' \
-                    -e '/^ *-s/ { p; s/s.*/S specifies the DNS server/ }' \
-                    -e '/^ *-v/ { p; s/v.*/V show version and license info/ }'
+  local h=hostname
+  host -h 2>&1 |sed -e 1d -e "2 { s/host /hosts / }" \
+                    -e "3 { s/^/ /; s/ $h.*/ [-S server ] $h [$h...]/ }" \
+                    -e "/^ *-s/ { p; s/s.*/S specifies the DNS server/ }" \
+                    -e "/^ *-v/ { p; s/v.*/V show version and license info/ }"
 }
 
 version() {
-  echo "hosts 0.2+20160312, Copyright 2002+ by Adam Katz, GPL v2+"
+  echo "hosts 0.2+20160326, Copyright 2002+ by Adam Katz, GPL v2+"
   echo "Part of net-scripts:  https://github.com/adamhotep/net-scripts"
 }
 
 # exits with an error if we are missing an option's required argument
-check_arg() {
+check() {
   if [ -z "$2" ]; then
     echo "hosts: option requires an argument -- $1" >&2
     echo "Learn more with:  hosts -h" >&2
@@ -31,33 +32,33 @@ fi
 # I've added a few long options merely because I can. It'll never be exhaustive.
 while [ "$1" != "${1#-}" ]; do
   case "$1" in
-    ( -h | --help )	help; exit ;;
-    ( -V | --version )	version; exit ;;
-    ( -S | --server )	check_arg "$@"; SERVER="$2"; shift ;;
-    ( -S* )		SERVER="${1#-S}" ;;
-    ( --server=?* )	SERVER="${1#--server=}" ;;
+    ( -h* | --help )	help; exit ;;
+    ( -V* | --version )	version; exit ;;
+    ( -S | --server )	check "$@"; server="$2"; shift ;;
+    ( -S* )		server="${1#-S}" ;;
+    ( --server=* )	server="${1#--server=}"; check "$1" "$server" ;;
     ( -- )		shift; break ;;
-    ( --type )		check_arg "$@"; OPTS="$OPTS -t $2"; shift ;;
-    ( --type=?* )	OPTS="$OPTS -t ${1#--type=}" ;;
+    ( --type )		check "$@"; OPTS="$OPTS -t $2"; shift ;;
+    ( --type=* )	OPTS="$OPTS -t ${1#--type=}"; check --type "${1#*=}" ;;
     ( -[cNtWRm] )	OPTS="$OPTS $1 $2"; shift ;; # all opts requiring args
     ( -[cNtWRm]* | -? )	OPTS="$OPTS $1" ;; # opt WITH arg or single opt w/o args
     ( -* )
       # Check for clusters of argument-less options ending in S for server.
       # Could replace many of the above cases, but this minimizes  sed  calls.
-      TEST="$(echo "x$1" |sed 's/^x-[^cNtWRm]*/-/')"
-      case "$TEST" in
-        ( -S )	check_arg "$@"; SERVER="$2"; OPTS="$OPTS ${1%S}"; shift ;;
-        ( -S* )	SERVER="${TEST#-S}"; OPTS="$OPTS ${1%S$SERVER}" ;;
+      test="$(echo "x$1" |sed 's/^x-[^cNtWRm]*/-/')"
+      case "$test" in
+        ( -S )	check "$@"; server="$2"; OPTS="$OPTS ${1%S}"; shift ;;
+        ( -S* )	server="${test#-S}"; OPTS="$OPTS ${1%S$server}" ;;
         ( * )	OPTS="$OPTS $1" ;;
       esac ;;
   esac
   shift
 done
 
-RETVAL=1
-for HOST in "$@"; do
-  host $OPTS "$HOST" $server && RETVAL=$?
+retval=1
+for fqdn in "$@"; do
+  host $OPTS "$fqdn" $server && retval=$?
 done
 
-exit $RETVAL # we exit true if ANY query had a result
+exit $retval # we exit true if ANY query had a result
 
