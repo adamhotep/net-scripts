@@ -1,0 +1,185 @@
+#!/bin/sh
+iam="${0##*/}"
+help() { cat <</help
+Persistent SSH connection for Linux systems
+Usage: $iam [ssh|xpra] [OPTIONS] DESTINATION [COMMAND]
+       $iam pump [WHAT]
+       $iam pump --install
+
+COMMAND is not recommended unless you're content letting it restart
+
+Requires NetworkManager (and its storage in [/var]/run/NetworkManager)
+and therefore THIS WILL NOT WORK ON A MAC (if you fix that, please share!).
+
+To trigger a pump on network startup, run \`$iam pump --install\`.
+This installs a simple script into /etc/network/if-up.d/persistent
+
+persistent 3.1.20220918 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
+(previously called 'smart-ssh' and 'persistent-ssh')
+https://github.com/adamhotep/net-scripts
+/help
+  exit
+}
+
+# Usage: warn [MESSAGE]
+# Display MESSAGE on standard error
+warn() { echo "$*" >&2; }
+
+# Usage: title_say MESSAGE
+# Report MESSAGE to the titlebar and standard output
+title_say() { printf "\e]0;%s\e\\ %s\n" "$*" "$*"; }
+
+# Usage: sleep TIME
+# As the standard sleep command but never report errors
+sleep() { command sleep "$@" 2>/dev/null; }
+
+# ASSUMPTION: The most recently modified file in [/var]/run/NetworkManager/
+#             is representative of the last network negotiation
+#             and/or [/var]/run/suspend.log or else /var/log/suspend.log
+#             is touched when resuming from sleep
+SYSTEM_PUMPDIR="/run/NetworkManager"
+SUSPEND_LOG="/run/suspend.log"
+if ! [ -d "$SYSTEM_PUMPDIR" ]; then SYSTEM_PUMPDIR="/var$SYSTEM_PUMPDIR"; fi
+if ! [ -d "$SUSPEND_LOG" ]; then SUSPEND_LOG="/var$SUSPEND_LOG"; fi
+if ! [ -d "$SUSPEND_LOG" ]; then SUSPEND_LOG="/var/log/${SUSPEND_LOG##*/}"; fi
+
+USER_PUMPFILE="/tmp/.persistent-pump-$LOGNAME"
+
+# ASSUMPTION: the `date` command supports +%s for seconds since epoch
+epoch() { date +%s; }
+
+# Usage: we_have COMMAND [COMMAND...]
+# silently returns true when we have all COMMANDs
+we_have() { command -v "$@" >/dev/null 2>&1; }
+
+# Pump: kill children of other instances so they can restart
+pump() {
+  case "$1" in
+    ( install | --install* ) install_pump ;;
+  esac
+  touch "$USER_PUMPFILE"
+  if [ -n "$1" ]; then	# pump only matching commands
+    { pgrep $iam |xargs -n1 -I@ pgrep -f -P @ "$1" |xargs kill; } 2>/dev/null
+  else			# pump all
+    { pgrep $iam |xargs -n1 pgrep -P |xargs kill; } 2>/dev/null
+  fi
+  exit $?
+}
+
+install_pump() {
+  script="/etc/network/if-up.d/persistent"
+  if [ ! -d "${script%/*}" ]; then
+    warn "Hm, you seem to lack a '${script%/*}' directory."
+    warn "I don't think your system is compatible with this technique :-("
+    exit 2
+  fi
+  if ! touch "$script" 2>/dev/null; then
+    warn "You need more permissions to install $script"
+    if command -v sudo >/dev/null; then warn "Try \`sudo $0 $*\`"; fi
+    exit 1
+  fi
+  if [ -s "$script" ]; then action="Overwriting existing"; fi
+  echo "${action:-Installing} $script ..."
+  if [ -n "$action" ]; then sleep 2; fi	# 'oops' buffer for Ctrl+C action
+  exec > "$script"
+  echo '#!/bin/sh'
+  echo '# Silently kill children of persistent sessions'
+  echo "# Created by $0"
+  echo "# https://github.com/adamhotep/net-scripts/blob/master/persistent"
+  echo '{ pgrep persistent |xargs -n1 pgrep -P |xargs kill; } 2>/dev/null'
+  echo 'true'
+  exit
+}
+
+# get the command (we currently support no options, so that's all merged)
+case "$1" in
+  ( help | -h | --help* )	help ;;
+  ( install-pump | --instal* )	install_pump "$@" ;;
+  ( pump | --pump )		shift; pump "$@" ;;
+  ( pump=* | --pump=* ) 	pump "${1#*=}" ;;
+  ( *xpra )			cmd=xpra ;;
+  ( *ssh | *ssh2 )		cmd=ssh ;;
+  ( * ) 			warn "$iam: Invalid command '$1'"; exit 2 ;;
+esac
+
+# got_net: silently return whether we can connect to google.com on port 443
+if we_have ncat
+  then got_net() { ncat --send-only --recv-only -w 333ms google.com 443; }
+  else got_net() { nc -zw1 google.com 443; }
+fi
+
+# on_ac_power: silently return whether we're plugged into AC power
+if ! we_have on_ac_power; then
+  on_ac_power() { return false; }	# dummy: assume we're NOT plugged in
+fi
+
+# Usage: was_pumped [MIN]
+# wait for net, return true if user pumped or net/system restarted in last MIN
+was_pumped() {
+  local min="${1:-1}" wait_time=1
+  echo
+  while ! got_net 2>/dev/null; do
+    if [ $wait_time -gt 4096 ] && ! on_ac_power; then # no power? abort at 1h
+      if ! [ "$ret" -gt 1 ] 2>/dev/null; then ret=1; fi
+      warn "$iam: 12 tests without network, connection lost >= 68 minutes ago"
+      warn "$iam: no AC power detected, exiting with failure code $ret"
+      exit $ret
+    elif [ $wait_time -gt 1 ]; then
+      printf '\r%s: no network, waiting for %ds...' "$iam" $wait_time >&2
+    fi
+    sleep $wait_time
+    # 1 2 4 8 16 32 1m 2m 4m 9m 17m 34m 1h 2h 4h ...
+    wait_time=$((wait_time * 2))
+  done
+  if [ $wait_time -gt 1 ]; then echo; fi	# complete 'no network' line
+  min=$((min + (wait_time + 30) / 60))	# add wait time in rounded minutes
+
+  # return true if we found a pump request, the system was suspended, or
+  # the network was refreshed via NetworkManager within N minutes (default N=1)
+  [ -n "$(find "$USER_PUMPFILE" "$SUSPEND_LOG" "$SYSTEM_PUMPDIR" \
+            -not -type d -mmin -$min 2>/dev/null)" ]
+}
+
+ret=0
+
+while true; do
+  "$@"
+  ret=$?
+
+  # differentiate between successful and not successful exits
+  # this requires startup and logout code like this: {{{
+  #
+  #    # ~/.bashrc (at the top)
+  #    _START="$EPOCHSECONDS"; [[ -z "$_START" ]] && _START="$(date +%s)"
+  #
+  #    # ~/.bash_logout (at the very top and then very bottom)
+  #    RETVAL=$?	# this must be the first line
+  #    # ...
+  #    _END="$EPOCHSECONDS"; [[ -z "$_END" ]] && _END="$(date +%s)"
+  #    # If this is a login shell and it returned cleanly and we have a start time
+  #    # and the shell ran for > 5 minutes and the SSH TTY is the current TTY
+  #    if [[ $((SHLVL + RETVAL)) == 1 && $_START -gt 0 \
+  #    && $((_END - _START)) -gt 300 && $SSH_TTY == $(tty) ]]; then
+  #      return 42	# for `persistent ssh ...`
+  #    fi
+  #    return $RETVAL
+  #
+  # Z-Shell can do this with "$(print -P '%D{%s}')" instead of "$EPOCHSECONDS"
+  # }}}
+  # Clean exit after 5min
+  if [ $ret = 42 ]; then
+    exit	# stop everything, return that clean exit 0
+  fi
+
+  # print five dots in 1.665 seconds (or 2s if sleep is too basic)
+  for i in 1 2 3 4 5; do
+    printf .
+    sleep 0.333 || sleep 2 && break
+  done
+  if ! was_pumped 1; then echo ''; exit $ret; fi
+  if [ "$cmd" != ssh ]; then sleep 1.5 || sleep 2; fi	# wait for ssh
+  title_say "reconnecting $*"
+  ( sleep 6; title_say "$iam $*"; ) &
+done
+
+exit $ret

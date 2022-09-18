@@ -17,6 +17,11 @@ Converts a [CIDR](https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing "
 A wrapper around `host` that accepts any number of hosts to look up (the DNS server may be specified as an option).
 
 
+## persistent
+
+A reconnection wrapper for SSH and Xpra on Linux. When your network reconnects (such as from waking your computer), so will your persistent SSH/Xpra sessions.
+
+
 ## poke
 
 Quick "is it running" test that runs on [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol "Transmission Control Protocol") rather than [ICMP](https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol "Internet Control Message Protocol") (ping).  Defaults to checking port 80 ([HTTP](https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol "Hypertext Transfer Protocol")).
