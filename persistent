@@ -14,7 +14,7 @@ and therefore THIS WILL NOT WORK ON A MAC (if you fix that, please share!).
 To trigger a pump on network startup, run \`$iam pump --install\`.
 This installs a simple script into /etc/network/if-up.d/persistent
 
-persistent 3.1.20220918 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
+persistent 3.2.20220918 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
 (previously called 'smart-ssh' and 'persistent-ssh')
 https://github.com/adamhotep/net-scripts
 /help
@@ -37,13 +37,14 @@ sleep() { command sleep "$@" 2>/dev/null; }
 #             is representative of the last network negotiation
 #             and/or [/var]/run/suspend.log or else /var/log/suspend.log
 #             is touched when resuming from sleep
-SYSTEM_PUMPDIR="/run/NetworkManager"
-SUSPEND_LOG="/run/suspend.log"
-if ! [ -d "$SYSTEM_PUMPDIR" ]; then SYSTEM_PUMPDIR="/var$SYSTEM_PUMPDIR"; fi
-if ! [ -d "$SUSPEND_LOG" ]; then SUSPEND_LOG="/var$SUSPEND_LOG"; fi
-if ! [ -d "$SUSPEND_LOG" ]; then SUSPEND_LOG="/var/log/${SUSPEND_LOG##*/}"; fi
+system_pumpdir="/run/NetworkManager"
+suspend_log="/run/suspend.log"
+pumper="/etc/network/if-up.d/persistent"
+if ! [ -d "$system_pumpdir" ]; then system_pumpdir="/var$system_pumpdir"; fi
+if ! [ -d "$suspend_log" ]; then suspend_log="/var$suspend_log"; fi
+if ! [ -d "$suspend_log" ]; then suspend_log="/var/log/${suspend_log##*/}"; fi
 
-USER_PUMPFILE="/tmp/.persistent-pump-$LOGNAME"
+user_pumpfile="/tmp/.persistent-pump-$LOGNAME"
 
 # ASSUMPTION: the `date` command supports +%s for seconds since epoch
 epoch() { date +%s; }
@@ -67,7 +68,7 @@ pump() {
     ( install | --install* ) install_pump ;;
   esac
   need_pgrep
-  touch "$USER_PUMPFILE"
+  touch "$user_pumpfile"
   if [ -n "$1" ]; then	# pump only matching commands
     { pgrep $iam |xargs -n1 -I@ pgrep -f -P @ "$1" |xargs kill; } 2>/dev/null
   else			# pump all
@@ -78,21 +79,20 @@ pump() {
 
 install_pump() {
   need_pgrep
-  script="/etc/network/if-up.d/persistent"
-  if [ ! -d "${script%/*}" ]; then
-    warn "Hm, you seem to lack a '${script%/*}' directory."
+  if [ ! -d "${pumper%/*}" ]; then
+    warn "Hm, you seem to lack a '${pumper%/*}' directory."
     warn "I don't think your system is compatible with this technique :-("
     exit 2
   fi
-  if ! touch "$script" 2>/dev/null; then
-    warn "You need more permissions to install $script"
+  if ! touch "$pumper" 2>/dev/null; then
+    warn "You need more permissions to install $pumper"
     if we_have sudo; then warn "Try \`sudo $0 $*\`"; fi
     exit 1
   fi
-  if [ -s "$script" ]; then action="Overwriting existing"; fi
-  echo "${action:-Installing} $script ..."
+  if [ -s "$pumper" ]; then action="Overwriting existing"; fi
+  echo "${action:-Installing} $pumper ..."
   if [ -n "$action" ]; then sleep 2; fi	# 'oops' buffer for Ctrl+C action
-  exec > "$script"
+  exec > "$pumper"
   echo '#!/bin/sh'
   echo '# Silently kill children of persistent sessions'
   echo "# Created by $0"
@@ -147,7 +147,7 @@ was_pumped() {
 
   # return true if we found a pump request, the system was suspended, or
   # the network was refreshed via NetworkManager within N minutes (default N=1)
-  [ -n "$(find "$USER_PUMPFILE" "$SUSPEND_LOG" "$SYSTEM_PUMPDIR" \
+  [ -n "$(find "$user_pumpfile" "$suspend_log" "$system_pumpdir" \
             -not -type d -mmin -$min 2>/dev/null)" ]
 }
 
@@ -161,19 +161,19 @@ while true; do
   # this requires startup and logout code like this: {{{
   #
   #    # ~/.bashrc (at the top)
-  #    _START="$EPOCHSECONDS"; [[ -z "$_START" ]] && _START="$(date +%s)"
+  #    _start="$EPOCHSECONDS"; [[ -z "$_start" ]] && _start="$(date +%s)"
   #
   #    # ~/.bash_logout (at the very top and then very bottom)
-  #    RETVAL=$?	# this must be the first line
+  #    retval=$?	# this must be the first line
   #    # ...
-  #    _END="$EPOCHSECONDS"; [[ -z "$_END" ]] && _END="$(date +%s)"
+  #    _end="$EPOCHSECONDS"; [[ -z "$_end" ]] && _end="$(date +%s)"
   #    # If this is a login shell and it returned cleanly and we have a start time
   #    # and the shell ran for > 5 minutes and the SSH TTY is the current TTY
   #    if [[ $((SHLVL + RETVAL)) == 1 && $_START -gt 0 \
-  #    && $((_END - _START)) -gt 300 && $SSH_TTY == $(tty) ]]; then
+  #    && $((_end - _start)) -gt 300 && $SSH_TTY == $(tty) ]]; then
   #      return 42	# for `persistent ssh ...`
   #    fi
-  #    return $RETVAL
+  #    return $retval
   #
   # Z-Shell can do this with "$(print -P '%D{%s}')" instead of "$EPOCHSECONDS"
   # }}}
