@@ -52,11 +52,21 @@ epoch() { date +%s; }
 # silently returns true when we have all COMMANDs
 we_have() { command -v "$@" >/dev/null 2>&1; }
 
+# Verify that we have pgrep
+need_pgrep() {
+  if we_have pgrep; then
+    warn "You need \`pgrep\` to pump connections."
+    warn "Maybe try \`apt install procps\` or your distro's equivalent"
+    exit 1
+  fi
+}
+
 # Pump: kill children of other instances so they can restart
 pump() {
   case "$1" in
     ( install | --install* ) install_pump ;;
   esac
+  need_pgrep
   touch "$USER_PUMPFILE"
   if [ -n "$1" ]; then	# pump only matching commands
     { pgrep $iam |xargs -n1 -I@ pgrep -f -P @ "$1" |xargs kill; } 2>/dev/null
@@ -67,6 +77,7 @@ pump() {
 }
 
 install_pump() {
+  need_pgrep
   script="/etc/network/if-up.d/persistent"
   if [ ! -d "${script%/*}" ]; then
     warn "Hm, you seem to lack a '${script%/*}' directory."
@@ -75,7 +86,7 @@ install_pump() {
   fi
   if ! touch "$script" 2>/dev/null; then
     warn "You need more permissions to install $script"
-    if command -v sudo >/dev/null; then warn "Try \`sudo $0 $*\`"; fi
+    if we_have sudo; then warn "Try \`sudo $0 $*\`"; fi
     exit 1
   fi
   if [ -s "$script" ]; then action="Overwriting existing"; fi
