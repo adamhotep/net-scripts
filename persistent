@@ -55,7 +55,7 @@ we_have() { command -v "$@" >/dev/null 2>&1; }
 
 # Verify that we have pgrep
 need_pgrep() {
-  if we_have pgrep; then
+  if ! we_have pgrep; then
     warn "You need \`pgrep\` to pump connections."
     warn "Maybe try \`apt install procps\` or your distro's equivalent"
     exit 1
