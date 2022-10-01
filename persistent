@@ -1,50 +1,86 @@
 #!/bin/sh
+# This script was previously known as 'smart-ssh' and 'persistent-ssh'
 iam="${0##*/}"
-help() { cat <</help
+help() {
+  if [ "$1" = remote ]; then help_remote; fi
+  cat <</help
 Persistent SSH connection for Linux systems
 Usage: $iam [ssh|xpra] [OPTIONS] DESTINATION [COMMAND]
        $iam pump [WHAT]
+       eval "\$($iam --completion)"
        $iam pump --install
+       $iam help remote
 
 COMMAND is not recommended unless you're content letting it restart
 
 Requires NetworkManager (and its storage in [/var]/run/NetworkManager)
 and therefore THIS WILL NOT WORK ON A MAC (if you fix that, please share!).
 
-To trigger a pump on network startup, run \`$iam pump --install\`.
-This installs a simple script into /etc/network/if-up.d/persistent
+To configure your system to always pump when the network starts up (like
+after waking from being suspended or hibernated), run \`$iam pump --install\`.
+This installs a simple script into $pumper
 
-persistent 3.2.20220918 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
-(previously called 'smart-ssh' and 'persistent-ssh')
+See \`$iam help remote\` for instructions on how to properly disengage a
+connection and prevent looping right back into a new ssh/xpra session.
+
+persistent 3.3.20220930 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
+(some parts, as labeled, are additionally licensed under the GPLv2+)
 https://github.com/adamhotep/net-scripts
 /help
   exit
 }
 
-# Usage: warn [MESSAGE]
+help_remote() {
+  local PAGER="${PAGER:-less}"
+  if [ "${LINES:-$(tput lines)}" -gt 27 ]; then PAGER=cat; fi
+  $PAGER <<'/help_remote'
+To differentiate between successful and unsuccessful exits
+on remote hosts, add startup and logout code like this to each host:
+
+~/.bashrc
+    # for use in ~/.bash_logout
+    get_epoch() { [ -n "$EPOCHSECONDS" ] && echo "$EPOCHSECONDS" || date +%s; }
+    _start="$(get_epoch)"
+
+~/.zshrc or ~/.zlogin
+    # for use in ~/.bash_logout or ~/.zlogout
+    get_epoch() { print -P '%D{%s}'; }
+    _start="$(get_epoch)"
+
+~/.bash_logout and ~/.zlogout (at the very top)
+    retval=$?	# this must be the first line
+
+~/.bash_logout and ~/.zlogout (at the very bottom)
+    # For `persistent ssh ...` usage. See `persistent help remote`
+    # or https://github.com/adamhotep/net-scripts/blob/master/persistent
+    _end="$(get_epoch)"
+    # If this is a login shell and it returned cleanly and we have a start time
+    # and the shell ran for > 5 minutes and the SSH TTY is the current TTY
+    if [[ $((SHLVL + retval)) == 1 && $_start -gt 0 \
+    && $((_end - _start)) -gt 300 && $SSH_TTY == "$(tty)" ]]; then
+      exit 42	# inform parent (`persistent ssh`) this was a clean exit
+    fi
+    exit $retval
+/help_remote
+  exit
+}
+
+# Usage: warn MESSAGE
 # Display MESSAGE on standard error
 warn() { echo "$*" >&2; }
 
+# Usage: die MESSAGE [ERROR]
+# Display MESSAGE on standard error and then exit with ERROR (default=2)
+die() { warn "$1"; exit ${2:-2}; }
+
 # Usage: title_say MESSAGE
 # Report MESSAGE to the titlebar and standard output
+# ASSUMPTION: your terminal supports titles
 title_say() { printf "\e]0;%s\e\\ %s\n" "$*" "$*"; }
 
 # Usage: sleep TIME
 # As the standard sleep command but never report errors
 sleep() { command sleep "$@" 2>/dev/null; }
-
-# ASSUMPTION: The most recently modified file in [/var]/run/NetworkManager/
-#             is representative of the last network negotiation
-#             and/or [/var]/run/suspend.log or else /var/log/suspend.log
-#             is touched when resuming from sleep
-system_pumpdir="/run/NetworkManager"
-suspend_log="/run/suspend.log"
-pumper="/etc/network/if-up.d/persistent"
-if ! [ -d "$system_pumpdir" ]; then system_pumpdir="/var$system_pumpdir"; fi
-if ! [ -d "$suspend_log" ]; then suspend_log="/var$suspend_log"; fi
-if ! [ -d "$suspend_log" ]; then suspend_log="/var/log/${suspend_log##*/}"; fi
-
-user_pumpfile="/tmp/.persistent-pump-$LOGNAME"
 
 # ASSUMPTION: the `date` command supports +%s for seconds since epoch
 epoch() { date +%s; }
@@ -53,12 +89,82 @@ epoch() { date +%s; }
 # silently returns true when we have all COMMANDs
 we_have() { command -v "$@" >/dev/null 2>&1; }
 
+# got_net: silently return whether we can resolve & connect to google.com:443
+if we_have ncat
+  then got_net() { ncat --send-only --recv-only -w 333ms google.com 443; }
+  else got_net() { nc -zw1 google.com 443; }
+fi
+
+# on_ac_power: silently return whether we're plugged into AC power
+if ! we_have on_ac_power; then
+  on_ac_power() { return false; }	# dummy: assume we're NOT plugged in
+fi
+
+# print instructions (for eval) on how to complete in bash or zsh (detect shell)
+completion() {
+  if [ -n "$BASH_VERSION" ] \
+  && we_have _init_completion && we_have _command_offset; then
+    bash_completion
+  elif [ -n "$ZSH_VERSION" ]; then
+    zsh_completion
+  else
+    die "Could not detect your shell, please invoke one of these:
+      $iam --bash-completion
+      $iam --zsh-completion"
+  fi
+}
+
+# print instructions (for eval) on how to complete in bash
+# (won't work for zsh since bashcompinit doesn't implement _command_offset)
+bash_completion() {
+  if [ -t 1 ]; then
+    sed 's/^    //' <<'    /disclaimer' >&2
+    # Good move. It is wise to review an `eval` call before running it.
+    # To set up completion, run this as:  eval "$(persistent --bash-completion)"
+    #
+    # This is largely borrowed from /usr/share/bash-completion/completions/sudo
+    # and this _persistent function is therefore dual-licensed under the GPLv2+
+    /disclaimer
+  fi
+  cat <<'  /bash_completion'
+    _persistent() {
+      local cur prev words cword split
+      _init_completion -s || return
+
+      for ((i = 1; i <= cword; i++)); do
+        case "${words[i]}" in
+          ( *ssh | *ssh2 | *xpra )
+            local root_command=${words[i]}
+            _command_offset $i
+            return
+            ;;
+        esac
+        break
+      done
+      case "$prev" in
+        ( pump | --pump ) COMPREPLY=($(compgen -W '--install')) ;;
+        ( help | --help ) COMPREPLY=($(compgen -W 'remote')) ;;
+        ( * ) COMPREPLY=($(compgen -W 'ssh xpra pump help
+          --help --bash-completion install-pump' -- "$cur")) ;;
+      esac
+    } && complete -F _persistent persistent
+  /bash_completion
+  exit
+}
+
+# print instructions (for eval) on how to complete in zsh
+# TODO: zsh-native solution
+zsh_completion() {
+  echo "autoload bashcompinit && bashcompinit"
+  echo "complete -W 'ssh xpra pump --bash-completion' $iam"
+  exit
+}
+
 # Verify that we have pgrep
 need_pgrep() {
   if ! we_have pgrep; then
     warn "You need \`pgrep\` to pump connections."
-    warn "Maybe try \`apt install procps\` or your distro's equivalent"
-    exit 1
+    die  "Maybe try \`apt install procps\` or your distro's equivalent"
   fi
 }
 
@@ -78,51 +184,35 @@ pump() {
 }
 
 install_pump() {
+  local sudo=''
   need_pgrep
   if [ ! -d "${pumper%/*}" ]; then
     warn "Hm, you seem to lack a '${pumper%/*}' directory."
-    warn "I don't think your system is compatible with this technique :-("
-    exit 2
+    die  "I don't think your system is compatible with this technique :-("
   fi
   if ! touch "$pumper" 2>/dev/null; then
     warn "You need more permissions to install $pumper"
-    if we_have sudo; then warn "Try \`sudo $0 $*\`"; fi
-    exit 1
+    read -p "Try with sudo?" sudo >&2
+    if [ "$sudo" = "${sudo#[Nn0]}" ]; then	# user didn't say "no"
+      if ! we_have sudo; then die "Maybe install sudo first."; fi
+      sudo=sudo
+    else
+      die "Aborted."
+    fi
   fi
   if [ -s "$pumper" ]; then action="Overwriting existing"; fi
   echo "${action:-Installing} $pumper ..."
   if [ -n "$action" ]; then sleep 2; fi	# 'oops' buffer for Ctrl+C action
-  exec > "$pumper"
-  echo '#!/bin/sh'
-  echo '# Silently kill children of persistent sessions'
-  echo "# Created by $0"
-  echo "# https://github.com/adamhotep/net-scripts/blob/master/persistent"
-  echo '{ pgrep persistent |xargs -n1 pgrep -P |xargs kill; } 2>/dev/null'
-  echo 'true'
+  {
+    echo '#!/bin/sh'
+    echo '# Silently kill children of persistent sessions'
+    echo "# Created by $0"
+    echo '# https://github.com/adamhotep/net-scripts/blob/master/persistent'
+    echo "{ pgrep '$iam' |xargs -n1 pgrep -P |xargs kill; } 2>/dev/null"
+    echo 'true'
+  } | $sudo tee "$pumper" >/dev/null
   exit
 }
-
-# get the command (we currently support no options, so that's all merged)
-case "$1" in
-  ( help | -h | --help* )	help ;;
-  ( install-pump | --instal* )	install_pump "$@" ;;
-  ( pump | --pump )		shift; pump "$@" ;;
-  ( pump=* | --pump=* ) 	pump "${1#*=}" ;;
-  ( *xpra )			cmd=xpra ;;
-  ( *ssh | *ssh2 )		cmd=ssh ;;
-  ( * ) 			warn "$iam: Invalid command '$1'"; exit 2 ;;
-esac
-
-# got_net: silently return whether we can connect to google.com on port 443
-if we_have ncat
-  then got_net() { ncat --send-only --recv-only -w 333ms google.com 443; }
-  else got_net() { nc -zw1 google.com 443; }
-fi
-
-# on_ac_power: silently return whether we're plugged into AC power
-if ! we_have on_ac_power; then
-  on_ac_power() { return false; }	# dummy: assume we're NOT plugged in
-fi
 
 # Usage: was_pumped [MIN]
 # wait for net, return true if user pumped or net/system restarted in last MIN
@@ -133,8 +223,7 @@ was_pumped() {
     if [ $wait_time -gt 4096 ] && ! on_ac_power; then # no power? abort at 1h
       if ! [ "$ret" -gt 1 ] 2>/dev/null; then ret=1; fi
       warn "$iam: 12 tests without network, connection lost >= 68 minutes ago"
-      warn "$iam: no AC power detected, exiting with failure code $ret"
-      exit $ret
+      die  "$iam: no AC power detected, exiting with failure code $ret" $ret
     elif [ $wait_time -gt 1 ]; then
       printf '\r%s: no network, waiting for %ds...' "$iam" $wait_time >&2
     fi
@@ -151,33 +240,40 @@ was_pumped() {
             -not -type d -mmin -$min 2>/dev/null)" ]
 }
 
+pumper="/etc/network/if-up.d/persistent"
+user_pumpfile="/tmp/.persistent-pump-$LOGNAME"
+
+# ASSUMPTION: The most recently modified file in [/var]/run/NetworkManager/
+#             is representative of the last network negotiation
+#             and/or [/var]/run/suspend.log or else /var/log/suspend.log
+#             is touched when resuming from sleep
+system_pumpdir="/run/NetworkManager"
+suspend_log="/run/suspend.log"
+if ! [ -d "$system_pumpdir" ]; then system_pumpdir="/var$system_pumpdir"; fi
+if ! [ -d "$suspend_log" ]; then suspend_log="/var$suspend_log"; fi
+if ! [ -d "$suspend_log" ]; then suspend_log="/var/log/${suspend_log##*/}"; fi
+
+# get the command (we currently support no options, so that's all merged)
+case "$1" in
+  ( --bash-completion ) 	bash_completion ;;
+  ( --completion )		completion ;;
+  ( --zsh-completion )		zsh_completion ;;
+  ( help | -h | --help* )	shift; help "$@" ;;
+  ( install-pump | --instal* )	install_pump "$@" ;;
+  ( pump | --pump )		shift; pump "$@" ;;
+  ( pump=* | --pump=* ) 	pump "${1#*=}" ;;
+  ( *xpra )			cmd=xpra ;;
+  ( *ssh | *ssh2 )		cmd=ssh ;;
+  ( * ) 			die "$iam: Invalid command '$1'" ;;
+esac
+
 ret=0
 
 while true; do
   "$@"
   ret=$?
 
-  # differentiate between successful and not successful exits
-  # this requires startup and logout code like this: {{{
-  #
-  #    # ~/.bashrc (at the top)
-  #    _start="$EPOCHSECONDS"; [[ -z "$_start" ]] && _start="$(date +%s)"
-  #
-  #    # ~/.bash_logout (at the very top and then very bottom)
-  #    retval=$?	# this must be the first line
-  #    # ...
-  #    _end="$EPOCHSECONDS"; [[ -z "$_end" ]] && _end="$(date +%s)"
-  #    # If this is a login shell and it returned cleanly and we have a start time
-  #    # and the shell ran for > 5 minutes and the SSH TTY is the current TTY
-  #    if [[ $((SHLVL + RETVAL)) == 1 && $_START -gt 0 \
-  #    && $((_end - _start)) -gt 300 && $SSH_TTY == $(tty) ]]; then
-  #      return 42	# for `persistent ssh ...`
-  #    fi
-  #    return $retval
-  #
-  # Z-Shell can do this with "$(print -P '%D{%s}')" instead of "$EPOCHSECONDS"
-  # }}}
-  # Clean exit after 5min
+  # Clean exit, see `persistent help remote` (help_remote() above)
   if [ $ret = 42 ]; then
     exit	# stop everything, return that clean exit 0
   fi
