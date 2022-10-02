@@ -18,7 +18,7 @@ waking from sleep) plus tab completion configuration and instructions on
 how to properly disengage a connection and prevent looping right back into
 a new ssh/xpra session.
 
-persistent 4.0.20221001 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
+persistent 4.0.20221002 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
 https://github.com/adamhotep/net-scripts
 /help
   exit
@@ -143,7 +143,7 @@ fi
 
 # on_ac_power: silently return whether we're plugged into AC power
 if ! we_have on_ac_power; then
-  on_ac_power() { return false; }	# dummy: assume we're NOT plugged in
+  on_ac_power() { return 1; }	# dummy: assume we're NOT plugged in
 fi
 
 completion_disclaimer() {
