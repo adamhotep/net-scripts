@@ -2,40 +2,82 @@
 # This script was previously known as 'smart-ssh' and 'persistent-ssh'
 iam="${0##*/}"
 help() {
-  if [ "$1" = remote ]; then help_remote; fi
+  if [ "$1" = install ]; then help_install; fi
   cat <</help
-Persistent SSH connection for Linux systems
+Persistent SSH connection for Linux systems that use NetworkManager
 Usage: $iam [ssh|xpra] [OPTIONS] DESTINATION [COMMAND]
-       $iam pump [WHAT]
-       eval "\$($iam --completion)"
-       $iam pump --install
-       $iam help remote
+       $iam pump [--install|PATTERN]
+       $iam help [install|run]
+       eval "\$($iam --bash-completion)"
+       source <($iam --zsh-completion)
 
 COMMAND is not recommended unless you're content letting it restart
 
-Requires NetworkManager (and its storage in [/var]/run/NetworkManager)
-and therefore THIS WILL NOT WORK ON A MAC (if you fix that, please share!).
+See \`$iam help install\` for how to auto-pump on network restarts (like
+waking from sleep) plus tab completion configuration and instructions on
+how to properly disengage a connection and prevent looping right back into
+a new ssh/xpra session.
 
-To configure your system to always pump when the network starts up (like
-after waking from being suspended or hibernated), run \`$iam pump --install\`.
-This installs a simple script into $pumper
-
-See \`$iam help remote\` for instructions on how to properly disengage a
-connection and prevent looping right back into a new ssh/xpra session.
-
-persistent 3.3.20220930 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
-(some parts, as labeled, are additionally licensed under the GPLv2+)
+persistent 4.0.20221001 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
 https://github.com/adamhotep/net-scripts
 /help
   exit
 }
 
-help_remote() {
+help_install() {
   local PAGER="${PAGER:-less}"
-  if [ "${LINES:-$(tput lines)}" -gt 27 ]; then PAGER=cat; fi
-  $PAGER <<'/help_remote'
-To differentiate between successful and unsuccessful exits
-on remote hosts, add startup and logout code like this to each host:
+  # $message_text is a variable so we can count its lines for the pager.
+  # Note that it switches from single to double quotes to get variables' values
+  message_text='DEPENDENCIES
+
+Currently, '"$iam"' supports SSH and xpra commands. This guide assumes you
+know about SSH. Xpra ("screen for X11") is documented at https://xpra.org
+and can be installed with on Debian/Ubuntu/Mint systems with `apt install xpra`
+or `dnf install xpra` on Fedora/Red Hat/Alma systems.
+
+'"$iam"' has the ability to "pump" (restart) its connections on demand
+(see AUTO-PUMP below), which requires `pgrep`. Install with `apt install procps`or `dnf install procps`.
+
+Auto-pumping requires NetworkManager, which most Linux systems use to manage
+their network interfaces. Install this with `apt install network-manager`
+or `dnf install NetworkManager` but beware: that might be a big move.
+
+
+AUTO-PUMP
+
+To install the auto-pump mechanism, run `'"$iam"' pump --install`.
+This adds a hook to NetworkManager that reestablishes your `'"$iam"'`
+connections with each network startup rather than waiting for timeouts,
+which is particularly useful in restarting connections upon waking from sleep.
+
+This installs a simple script into `'"$pumper"'`.
+
+
+TAB COMPLETION
+
+You can configure tab completion for '"$iam"' arguments.
+For bash, run `eval "$('"$iam"' --bash-completion)"`.
+For zsh, run `source <('"$iam"' --zsh-completion)`.
+
+To install this in your ~/.bashrc, set it up to load on your first completion:
+
+    _persistent() { eval "$('"$iam"' --bash-completion)"; _persistent "$@"; }
+    complete -F _persistent "'"$iam"'"
+
+To install this in your ~/.zshrc, set it up to load on your first completion:
+
+     _persistent() { source <("'"$iam"'" --zsh-completion); _persistent "$@"; }
+     compdef _persistent "'"$iam"'"
+
+
+PROPER EXIT STATUS FOR RESTARTING CONNECTIONS
+
+'"$iam"' will automatically restart any managed ssh/xpra session unless it
+exits with code 42. You need to alter the configuration for each of your
+REMOTE hosts to detect a clean exit and convert it from 0 to 42.
+
+These examples support Bash and Z shell (Zsh). Unless you use both shells,
+you only need to create/modify files that start with `.bash` or with `.z`
 
 ~/.bashrc
     # for use in ~/.bash_logout
@@ -44,24 +86,28 @@ on remote hosts, add startup and logout code like this to each host:
 
 ~/.zshrc or ~/.zlogin
     # for use in ~/.bash_logout or ~/.zlogout
-    get_epoch() { print -P '%D{%s}'; }
+    get_epoch() { print -P "%D{%s}"; }
     _start="$(get_epoch)"
 
 ~/.bash_logout and ~/.zlogout (at the very top)
     retval=$?	# this must be the first line
 
 ~/.bash_logout and ~/.zlogout (at the very bottom)
-    # For `persistent ssh ...` usage. See `persistent help remote`
+    # For `'"$iam"' ssh ...` usage. See `'"$iam"' help install`
     # or https://github.com/adamhotep/net-scripts/blob/master/persistent
     _end="$(get_epoch)"
     # If this is a login shell and it returned cleanly and we have a start time
     # and the shell ran for > 5 minutes and the SSH TTY is the current TTY
     if [[ $((SHLVL + retval)) == 1 && $_start -gt 0 \
     && $((_end - _start)) -gt 300 && $SSH_TTY == "$(tty)" ]]; then
-      exit 42	# inform parent (`persistent ssh`) this was a clean exit
+      exit 42	# inform parent (`'"$iam"' ssh`) this was a clean exit
     fi
-    exit $retval
-/help_remote
+    exit $retval'
+  if [ ! -t 1 ] \
+  || [ "${LINES:-$(tput lines)}" -gt $(echo "$message_text" |grep -c ^) ]; then
+    PAGER=cat
+  fi
+  echo "$message_text" |$PAGER
   exit
 }
 
@@ -100,71 +146,98 @@ if ! we_have on_ac_power; then
   on_ac_power() { return false; }	# dummy: assume we're NOT plugged in
 fi
 
-# print instructions (for eval) on how to complete in bash or zsh (detect shell)
-completion() {
-  if [ -n "$BASH_VERSION" ] \
-  && we_have _init_completion && we_have _command_offset; then
-    bash_completion
-  elif [ -n "$ZSH_VERSION" ]; then
-    zsh_completion
-  else
-    die "Could not detect your shell, please invoke one of these:
-      $iam --bash-completion
-      $iam --zsh-completion"
+completion_disclaimer() {
+  if [ -t 1 ]; then
+    warn "# Good move. It is wise to review \`$1\` code before running it."
+    warn "# For proper invocation instructions, see \`$iam help install\`."
   fi
 }
 
 # print instructions (for eval) on how to complete in bash
 # (won't work for zsh since bashcompinit doesn't implement _command_offset)
 bash_completion() {
-  if [ -t 1 ]; then
-    sed 's/^    //' <<'    /disclaimer' >&2
-    # Good move. It is wise to review an `eval` call before running it.
-    # To set up completion, run this as:  eval "$(persistent --bash-completion)"
-    #
-    # This is largely borrowed from /usr/share/bash-completion/completions/sudo
-    # and this _persistent function is therefore dual-licensed under the GPLv2+
-    /disclaimer
-  fi
+  completion_disclaimer eval
   cat <<'  /bash_completion'
     _persistent() {
-      local cur prev words cword split
+      local cur prev words cword split root_command
       _init_completion -s || return
 
-      for ((i = 1; i <= cword; i++)); do
-        case "${words[i]}" in
-          ( *ssh | *ssh2 | *xpra )
-            local root_command=${words[i]}
-            _command_offset $i
-            return
-            ;;
-        esac
-        break
-      done
-      case "$prev" in
-        ( pump | --pump ) COMPREPLY=($(compgen -W '--install')) ;;
-        ( help | --help ) COMPREPLY=($(compgen -W 'remote')) ;;
-        ( * ) COMPREPLY=($(compgen -W 'ssh xpra pump help
-          --help --bash-completion install-pump' -- "$cur")) ;;
+      case "${words[1]}" in
+        ( *ssh | *ssh2 | *xpra )
+          root_command=${words[1]}
+          _command_offset 1
+          return
+          ;;
       esac
-    } && complete -F _persistent persistent
+      case "$prev" in
+        ( pump | --pump ) COMPREPLY=($(compgen -W '--install' -- "$cur")) ;;
+        ( help | --help ) COMPREPLY=($(compgen -W 'install run' -- "$cur")) ;;
+        ( * ) COMPREPLY=($(compgen -W 'help pump ssh xpra --help
+          --bash-completion --zsh-completion' -- "$cur")) ;;
+      esac
+    }
   /bash_completion
+  printf '    complete -F _persistent "%s"\n' "$iam"
   exit
 }
 
-# print instructions (for eval) on how to complete in zsh
-# TODO: zsh-native solution
+# print instructions (for sourcing) on how to complete in zsh
 zsh_completion() {
-  echo "autoload bashcompinit && bashcompinit"
-  echo "complete -W 'ssh xpra pump --bash-completion' $iam"
+  completion_disclaimer source
+  cat <<'  /zsh_completion'
+    _persistent() {
+      local line state
+      _arguments -C "1: :->cmds" "*::arg:->args"
+      case "$state" in
+        ( cmds )
+          _values "persistent command" \
+            "help[get help or installation documentation]" \
+            "pump[pump all or matching connections]" \
+            "ssh[persistent SSH secure shell]" \
+            "xpra[persistent remote X application viewer]"
+          _arguments -S \
+            '--bash-completion[show bash completion code]' \
+            '--help[get help or installation documentation]' \
+            '--zsh-completion[show Z-shell completion code]'
+          ;;
+        ( args )
+          case $line[1] in
+            ( help )
+              _arguments -C "1: :->cmds"
+              if [ "$state" = "cmds" ]; then
+                _values "help" \
+                  "run[Basic command-line help (default)]" \
+                  "install[How to install auto-pump and remote shell exit cues]"
+              fi
+              ;;
+            ( pump )
+              _arguments -C "1: :->cmds" "*::arg:->args"
+              case "$state" in ( cmds )
+                _values pattern ":strings:pattern:"
+                _arguments -S \
+                  --install'[Install auto-pump on network configuration]'
+                ;;
+              esac
+              ;;
+            ( *ssh | *ssh2 )
+              words[1]=(ssh); service=ssh; _ssh ;;
+            ( *xpra )
+              if ! command -v _xpra >/dev/null; then return; fi
+              words[1]=(xpra); service=xpra; _xpra ;;
+          esac
+        ;;
+      esac
+    }
+  /zsh_completion
+  printf '    compdef _persistent "%s"\n' "$iam"
   exit
 }
 
 # Verify that we have pgrep
 need_pgrep() {
   if ! we_have pgrep; then
-    warn "You need \`pgrep\` to pump connections."
-    die  "Maybe try \`apt install procps\` or your distro's equivalent"
+    warn 'You need `pgrep` from procps to pump connections.'
+    die  "See \`$iam help install\` for help installing dependencies."
   fi
 }
 
@@ -192,7 +265,7 @@ install_pump() {
   fi
   if ! touch "$pumper" 2>/dev/null; then
     warn "You need more permissions to install $pumper"
-    read -p "Try with sudo?" sudo >&2
+    read -p "Try with sudo [Yn]? " sudo >&2
     if [ "$sudo" = "${sudo#[Nn0]}" ]; then	# user didn't say "no"
       if ! we_have sudo; then die "Maybe install sudo first."; fi
       sudo=sudo
@@ -205,7 +278,7 @@ install_pump() {
   if [ -n "$action" ]; then sleep 2; fi	# 'oops' buffer for Ctrl+C action
   {
     echo '#!/bin/sh'
-    echo '# Silently kill children of persistent sessions'
+    echo '# Silently kill children of persistent sessions so they restart'
     echo "# Created by $0"
     echo '# https://github.com/adamhotep/net-scripts/blob/master/persistent'
     echo "{ pgrep '$iam' |xargs -n1 pgrep -P |xargs kill; } 2>/dev/null"
@@ -241,7 +314,7 @@ was_pumped() {
 }
 
 pumper="/etc/network/if-up.d/persistent"
-user_pumpfile="/tmp/.persistent-pump-$LOGNAME"
+user_pumpfile="/tmp/.persistent-pump-$HOSTNAME-$LOGNAME"
 
 # ASSUMPTION: The most recently modified file in [/var]/run/NetworkManager/
 #             is representative of the last network negotiation
@@ -256,7 +329,6 @@ if ! [ -d "$suspend_log" ]; then suspend_log="/var/log/${suspend_log##*/}"; fi
 # get the command (we currently support no options, so that's all merged)
 case "$1" in
   ( --bash-completion ) 	bash_completion ;;
-  ( --completion )		completion ;;
   ( --zsh-completion )		zsh_completion ;;
   ( help | -h | --help* )	shift; help "$@" ;;
   ( install-pump | --instal* )	install_pump "$@" ;;
@@ -269,16 +341,21 @@ esac
 
 ret=0
 
+# initial self-report (on delay after a restart)
+title_say "$iam $*"
+
 while true; do
   "$@"
   ret=$?
 
-  # Clean exit, see `persistent help remote` (help_remote() above)
+  # Clean exit, see `persistent help install` (help_install() above)
   if [ $ret = 42 ]; then
     exit	# stop everything, return that clean exit 0
   fi
 
-  # print five dots in 1.665 seconds (or 2s if sleep is too basic)
+  # Print five dots in 1.665 seconds (or 2s if sleep is too basic).
+  # There used to be an increasing wait time here, but that proved unhelpful.
+  # TODO: consider returning old wait time increases, maybe peek at autossh.
   for i in 1 2 3 4 5; do
     printf .
     sleep 0.333 || sleep 2 && break
