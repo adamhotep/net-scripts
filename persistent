@@ -354,8 +354,6 @@ while true; do
   fi
 
   # Print five dots in 1.665 seconds (or 2s if sleep is too basic).
-  # There used to be an increasing wait time here, but that proved unhelpful.
-  # TODO: consider returning old wait time increases, maybe peek at autossh.
   for i in 1 2 3 4 5; do
     printf .
     sleep 0.333 || sleep 2 && break
