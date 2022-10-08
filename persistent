@@ -8,8 +8,7 @@ Persistent SSH connection for Linux systems that use NetworkManager
 Usage: $iam [ssh|xpra] [OPTIONS] DESTINATION [COMMAND]
        $iam pump [--install|PATTERN]
        $iam help [install|run]
-       eval "\$($iam --bash-completion)"
-       source <($iam --zsh-completion)
+       source <($iam --completion)
 
 COMMAND is not recommended unless you're content letting it restart
 
@@ -18,7 +17,7 @@ waking from sleep) plus tab completion configuration and instructions on
 how to properly disengage a connection and prevent looping right back into
 a new ssh/xpra session.
 
-persistent 4.0.20221002 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
+persistent 4.1.20221007 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
 https://github.com/adamhotep/net-scripts
 /help
   exit
@@ -56,18 +55,17 @@ This installs a simple script into `'"$pumper"'`.
 TAB COMPLETION
 
 You can configure tab completion for '"$iam"' arguments.
-For bash, run `eval "$('"$iam"' --bash-completion)"`.
-For zsh, run `source <('"$iam"' --zsh-completion)`.
+Just run `source <('"$iam"' --completion)` in either bash or zsh.
 
 To install this in your ~/.bashrc, set it up to load on your first completion:
 
-    _persistent() { eval "$('"$iam"' --bash-completion)"; _persistent "$@"; }
+    _persistent() { source <("'"$iam"'" --completion); _persistent "$@"; }
     complete -F _persistent "'"$iam"'"
 
 To install this in your ~/.zshrc, set it up to load on your first completion:
 
-     _persistent() { source <("'"$iam"'" --zsh-completion); _persistent "$@"; }
-     compdef _persistent "'"$iam"'"
+    _persistent() { source <("'"$iam"'" --completion); _persistent "$@"; }
+    compdef _persistent "'"$iam"'"
 
 
 PROPER EXIT STATUS FOR RESTARTING CONNECTIONS
@@ -148,15 +146,25 @@ fi
 
 completion_disclaimer() {
   if [ -t 1 ]; then
-    warn "# Good move. It is wise to review \`$1\` code before running it."
+    warn "# Good move. It is wise to review \`source\` code before running it."
     warn "# For proper invocation instructions, see \`$iam help install\`."
   fi
 }
 
-# print instructions (for eval) on how to complete in bash
+# automatically detect the shell and provide the correct copmletion function
+completion() {
+  case $SHELL in
+    ( *bash* )	bash_completion ;;
+    ( *zsh* )	zsh_completion ;;
+  esac
+  die "Couldn't detect shell; try --bash-completion or --zsh-completion"
+  exit
+}
+
+# print instructions on how to complete in bash
 # (won't work for zsh since bashcompinit doesn't implement _command_offset)
 bash_completion() {
-  completion_disclaimer eval
+  completion_disclaimer
   cat <<'  /bash_completion'
     _persistent() {
       local cur prev words cword split root_command
@@ -173,7 +181,7 @@ bash_completion() {
         ( pump | --pump ) COMPREPLY=($(compgen -W '--install' -- "$cur")) ;;
         ( help | --help ) COMPREPLY=($(compgen -W 'install run' -- "$cur")) ;;
         ( * ) COMPREPLY=($(compgen -W 'help pump ssh xpra --help
-          --bash-completion --zsh-completion' -- "$cur")) ;;
+          --completion --bash-completion --zsh-completion' -- "$cur")) ;;
       esac
     }
   /bash_completion
@@ -183,8 +191,19 @@ bash_completion() {
 
 # print instructions (for sourcing) on how to complete in zsh
 zsh_completion() {
-  completion_disclaimer source
+  completion_disclaimer
   cat <<'  /zsh_completion'
+    if ! command -v "$_comps[xpra]" >/dev/null; then
+      # No xpra completion? Here is a quick-and-dirty version via --help
+      _xpra_subcommands=( $(
+        xpra --help |awk '/^Options/{exit} $1=="xpra"{print $2}'
+      ) )
+      _xpra() {
+        _describe subcommands _xpra_subcommands
+        _gnu_generic xpra
+      }
+      compdef _xpra xpra
+    fi
     _persistent() {
       local line state
       _arguments -C "1: :->cmds" "*::arg:->args"
@@ -197,8 +216,9 @@ zsh_completion() {
             "xpra[persistent remote X application viewer]"
           _arguments -S \
             '--bash-completion[show bash completion code]' \
+            '--completion[auto-detect bash/zsh, show its completion code]' \
             '--help[get help or installation documentation]' \
-            '--zsh-completion[show Z-shell completion code]'
+            '--zsh-completion[show Z shell completion code]'
           ;;
         ( args )
           case $line[1] in
@@ -220,10 +240,9 @@ zsh_completion() {
               esac
               ;;
             ( *ssh | *ssh2 )
-              words[1]=(ssh); service=ssh; _ssh ;;
+              words[1]=(ssh); service=ssh; "$_comps[ssh]" ;;
             ( *xpra )
-              if ! command -v _xpra >/dev/null; then return; fi
-              words[1]=(xpra); service=xpra; _xpra ;;
+              words[1]=(xpra); service=xpra; "$_comps[xpra]" ;;
           esac
         ;;
       esac
@@ -328,6 +347,7 @@ if ! [ -d "$suspend_log" ]; then suspend_log="/var/log/${suspend_log##*/}"; fi
 
 # get the command (we currently support no options, so that's all merged)
 case "$1" in
+  ( --completion )		completion ;;
   ( --bash-completion ) 	bash_completion ;;
   ( --zsh-completion )		zsh_completion ;;
   ( help | -h | --help* )	shift; help "$@" ;;
