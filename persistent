@@ -193,7 +193,7 @@ bash_completion() {
 zsh_completion() {
   completion_disclaimer
   cat <<'  /zsh_completion'
-    if ! command -v "$_comps[xpra]" >/dev/null; then
+    if type xpra >/dev/null && ! type "$_comps[xpra]" >/dev/null; then
       # No xpra completion? Here is a quick-and-dirty version via --help
       _xpra_subcommands=( $(
         xpra --help |awk '/^Options/{exit} $1=="xpra"{print $2}'
