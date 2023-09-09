@@ -1,0 +1,83 @@
+#!/bin/sh
+help() { cat <</help
+Look up and parse MX record (or else A record; see RFC821) for given host(s)
+Usge: mx [OPTIONS] host [host...]
+
+  -0, --as-is   Do not clean up arguments. Assume hosts are valid.
+
+v0.5.20230909.0 copyright 2010+ by Adam Katz, GPLv2+
+Part of net-scripts: https://github.com/adamhotep/net-scripts
+/help
+exit
+}
+
+# Defaults
+AS_IS=
+
+# in case column doesn't exist, create a dummy for it
+if ! command -v column >/dev/null 2>&1; then column() { cat; }; fi
+
+die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+while getopts 0hvV-: opt; do
+  if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#$OPT}" OPTARG="${OPTARG#=}"
+  fi
+  case $opt in
+    ( 0 | as-is )	AS_IS="-0" ;;
+    ( h* )		help ;;
+    ( [Vv] | vers* )	help |tail -n2 ;;
+    ( \? )		die "Try --help" >&2 ;;
+    ( ??* )		die "Illegal option --$OPTARG ... Try --help" ;;
+  esac
+done
+shift $((OPTIND-1))
+
+for host in "$@"; do
+
+  if [ "$host" != "$1" ]; then echo ""; fi	# space betwen hosts
+  if [ $# -gt 1 ]; then echo "$host:"; fi	# identify each host if 2+ hosts
+
+  if [ -z "$AS_IS" ]; then			# cleanup
+    host="${host##*[<@]}"			# remove username if present
+    while true; do	# peel off bad chars from start
+      hh="${host#[!a-zA-Z0-9_.-]}"	# [^...] now fails(!) using older [!...]
+      if [ "$hh" = "$host" ]; then break; fi
+      host="$hh"
+    done
+    host="${host%%[!a-zA-Z0-9_.-]*}"		# remove trailing garbage
+  fi
+
+  host -t MX -- "$host" |awk -v host="$host" '
+    NF == 7 && $2$3$4$5 == "mailishandledby" {
+      pref[$NF] = $6
+      next
+    }
+
+    # RFC5321 5.1 says we fail over to the host itself if there is no MX:
+    #     If an empty list of MXs is returned, the address is
+    #     treated as if it was associated with an implicit MX RR,
+    #     with a preference of 0, pointing to that host.
+    $3$4$5 == "noMXrecord" { pref[host] = 0 }
+    { print > "/dev/stderr" }
+    #/\(NXDOMAIN\)/ { retval = 1 }	# not usable thanks to sort filter
+
+    END {
+
+      for (mx in pref) {
+        cmd = "host -- " mx
+        while ( (cmd | getline) > 0) {
+          if ($2 $3 $4 $5 == "mailishandledby") continue
+          if (index($NF,"(NXDOMAIN)")) {
+            $NF = "NXDOMAIN"
+            $1 = $2
+          }
+          printf "%4d  %-15s  %s\n", pref[mx], $NF, $1
+        }
+        close (cmd)
+      }
+
+    }
+  ' |sort -k1n,1 -k3b,3 -k2n,2 |column -t
+
+done
