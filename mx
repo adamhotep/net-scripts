@@ -3,28 +3,30 @@ help() { cat <</help
 Look up and parse MX record (or else A record; see RFC821) for given host(s)
 Usge: mx [OPTIONS] host [host...]
 
-  -0, --as-is   Do not clean up arguments. Assume hosts are valid.
+  -0, --as-is     Do not clean up arguments. Assume hosts are valid.
+  -d, --dns=HOST  Use HOST as the DNS server
 
-v0.5.20230909.0 copyright 2010+ by Adam Katz, GPLv2+
+v0.6.20230923.0 copyright 2010+ by Adam Katz, GPLv2+
 Part of net-scripts: https://github.com/adamhotep/net-scripts
 /help
 exit
 }
 
 # Defaults
-AS_IS=
+as_is=
 
 # in case column doesn't exist, create a dummy for it
 if ! command -v column >/dev/null 2>&1; then column() { cat; }; fi
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
-while getopts 0hvV-: opt; do
+while getopts 0d:hvV-: opt; do
   if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
     OPT="${OPTARG%%=*}" OPTARG="${OPTARG#$OPT}" OPTARG="${OPTARG#=}"
   fi
   case $opt in
-    ( 0 | as-is )	AS_IS="-0" ;;
+    ( 0 | as-is )	as_is="-0" ;;
+    ( d | dns* )	needs_arg; dns="$OPTARG" ;;
     ( h* )		help ;;
     ( [Vv] | vers* )	help |tail -n2 ;;
     ( \? )		die "Try --help" >&2 ;;
@@ -33,12 +35,17 @@ while getopts 0hvV-: opt; do
 done
 shift $((OPTIND-1))
 
+# very basic sanity check on the DNS server being legit (and okay to not quote)
+case $dns in ( *[!A-Za-z0-9.-]* | [.-]* | *[.-][.-]* | *- )
+  die "Invalid DNS server '$dns'" ;;
+esac
+
 for host in "$@"; do
 
   if [ "$host" != "$1" ]; then echo ""; fi	# space betwen hosts
   if [ $# -gt 1 ]; then echo "$host:"; fi	# identify each host if 2+ hosts
 
-  if [ -z "$AS_IS" ]; then			# cleanup
+  if [ -z "$as_is" ]; then			# cleanup
     host="${host##*[<@]}"			# remove username if present
     while true; do	# peel off bad chars from start
       hh="${host#[!a-zA-Z0-9_.-]}"	# [^...] now fails(!) using older [!...]
@@ -48,7 +55,11 @@ for host in "$@"; do
     host="${host%%[!a-zA-Z0-9_.-]*}"		# remove trailing garbage
   fi
 
-  host -t MX -- "$host" |awk -v host="$host" '
+  host -t MX -- "$host" $dns |awk -v host="$host" -v dns="$dns" '
+    function dns_notes() {
+      return (NF==0 || /^(Using domain server|Name|Address|Aliases):/)
+    }
+    dns_notes() { next }
     NF == 7 && $2$3$4$5 == "mailishandledby" {
       pref[$NF] = $6
       next
@@ -65,9 +76,9 @@ for host in "$@"; do
     END {
 
       for (mx in pref) {
-        cmd = "host -- " mx
+        cmd = "host -- " mx " " dns
         while ( (cmd | getline) > 0) {
-          if ($2 $3 $4 $5 == "mailishandledby") continue
+          if (dns_notes() || $2 $3 $4 $5 == "mailishandledby") continue
           if (index($NF,"(NXDOMAIN)")) {
             $NF = "NXDOMAIN"
             $1 = $2
