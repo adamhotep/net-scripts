@@ -17,7 +17,7 @@ waking from sleep) plus tab completion configuration and instructions on
 how to properly disengage a connection and prevent looping right back into
 a new ssh/xpra session.
 
-persistent 4.1.20221007 Copyright 2008+ Adam Katz, licenced as 2-clause BSD
+persistent 4.2.20231215.0 Copyright 2008+ Adam Katz, licensed as 2-clause BSD
 https://github.com/adamhotep/net-scripts
 /help
   exit
@@ -49,7 +49,10 @@ This adds a hook to NetworkManager that reestablishes your `'"$iam"'`
 connections with each network startup rather than waiting for timeouts,
 which is particularly useful in restarting connections upon waking from sleep.
 
-This installs a simple script into `'"$pumper"'`.
+This uses `sudo` to add a simple dispatcher script for NetworkManager to call
+when the network is reconnected (see `man 8 NetworkManager-dispatcher`), to live
+at `'"$pumper"'` or, for older systems,
+`'"$old_pumper"'`.
 
 
 TAB COMPLETION
@@ -62,7 +65,7 @@ To install this in your ~/.bashrc, set it up to load on your first completion:
     _persistent() { source <("'"$iam"'" --completion); _persistent "$@"; }
     complete -F _persistent "'"$iam"'"
 
-To install this in your ~/.zshrc, set it up to load on your first completion:
+To install this in your ~/.zshrc, use the same function with compdef:
 
     _persistent() { source <("'"$iam"'" --completion); _persistent "$@"; }
     compdef _persistent "'"$iam"'"
@@ -83,7 +86,7 @@ you only need to create/modify files that start with `.bash` or with `.z`
     _start="$(get_epoch)"
 
 ~/.zshrc or ~/.zlogin
-    # for use in ~/.bash_logout or ~/.zlogout
+    # for use in ~/.zlogout
     get_epoch() { print -P "%D{%s}"; }
     _start="$(get_epoch)"
 
@@ -151,7 +154,7 @@ completion_disclaimer() {
   fi
 }
 
-# automatically detect the shell and provide the correct copmletion function
+# automatically detect the shell and provide the correct completion function
 completion() {
   case $SHELL in
     ( *bash* )	bash_completion ;;
@@ -279,14 +282,20 @@ install_pump() {
   local sudo=''
   need_pgrep
   if [ ! -d "${pumper%/*}" ]; then
-    warn "Hm, you seem to lack a '${pumper%/*}' directory."
+    warn "You seem to lack a '${pumper%/*}' directory."
+    warn "Let's try again with the older '${old_pumper%/*}' system."
+    pumper="$old_pumper"
+    pumper_old=1
+  fi
+  if [ ! -d "${pumper%/*}" ]; then
+    warn "You seem to${pumper_old:+ also} lack a '${pumper%/*}' directory."
     die  "I don't think your system is compatible with this technique :-("
   fi
   if ! touch "$pumper" 2>/dev/null; then
     warn "You need more permissions to install $pumper"
     read -p "Try with sudo [Yn]? " sudo >&2
     if [ "$sudo" = "${sudo#[Nn0]}" ]; then	# user didn't say "no"
-      if ! we_have sudo; then die "Maybe install sudo first."; fi
+      if ! we_have sudo; then die "Please install sudo first."; fi
       sudo=sudo
     else
       die "Aborted."
@@ -300,9 +309,16 @@ install_pump() {
     echo '# Silently kill children of persistent sessions so they restart'
     echo "# Created by $0"
     echo '# https://github.com/adamhotep/net-scripts/blob/master/persistent'
+    if [ -z "$pumper_old" ]; then
+      echo 'case "$2" in'
+      echo '  ( up | connectivity-change | vpn-up | dhcp?-change ) : act ;;'
+      echo '  ( * ) exit ;;'
+      echo 'esac'
+    fi
     echo "{ pgrep '$iam' |xargs -n1 pgrep -P |xargs kill; } 2>/dev/null"
     echo 'true'
   } | $sudo tee "$pumper" >/dev/null
+  $sudo chmod 755 "$pumper"
   exit
 }
 
@@ -332,7 +348,8 @@ was_pumped() {
             -not -type d -mmin -$min 2>/dev/null)" ]
 }
 
-pumper="/etc/network/if-up.d/persistent"
+old_pumper="/etc/network/if-up.d/persistent"
+pumper="/etc/NetworkManager/dispatcher.d/persistent"
 user_pumpfile="/tmp/.persistent-pump-$HOSTNAME-$LOGNAME"
 
 # ASSUMPTION: The most recently modified file in [/var]/run/NetworkManager/
