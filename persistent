@@ -17,8 +17,8 @@ waking from sleep) plus tab completion configuration and instructions on
 how to properly disengage a connection and prevent looping right back into
 a new ssh/xpra session.
 
-persistent 4.2.20231215.0 Copyright 2008+ Adam Katz, licensed as 2-clause BSD
-https://github.com/adamhotep/net-scripts
+Part of net-scripts: https://github.com/adamhotep/net-scripts
+persistent 4.2.20231215.1 Copyright 2008+ Adam Katz, GPLv2+/BSD 2-clause
 /help
   exit
 }
