@@ -1,0 +1,408 @@
+#!/bin/sh
+help() { cat <</help
+Look up and parse SPF record (or else verify MX) for given domain(s)
+Usage: spf [OPTIONS] host [host...]
+
+  -@, --via=SERVER      Query this DNS server
+  -c, --count           Count the IPs blessed by these SPF record(s)
+  -d, --dns=NUM         Maximum DNS queries to allow (default=10, see RFC 7208)
+  -h, --human-readable  Display counts with comma separators
+  -s, --selector=SEL    Comma-delimited DKIM selector list (SEL from \`s=SEL\`)
+  -v, --verbose         Do not filter out non-DKIM/DMARC/SPF TXT records
+
+Selectors are currently set to: $selectors
+
+Part of net-scripts: https://github.com/adamhotep/net-scripts
+spf 0.13.20240317.1 Copyright 2010+ by Adam Katz, AGPLv3
+/help
+  exit
+}
+warn() { echo "$*" >&2; }	# complain to STDERR
+die() { warn "$*"; exit 2; }	# complain to STDERR and exit with error
+
+# Changelog
+# 0.10	Added IPv6 support (the `a` SPF mechanism refers to A or AAAA)
+# 0.11	Sort TXT records, remove non-SPF TXT records from `include` traversals
+# 0.12	Added --count, debug, plus DNS traversal limits & --dns
+# 0.13	Added --via, --verbose, and better filtering
+
+if ! set -o |awk '$1 $2 == "xtraceon" { exit 1 }'	# if xtrace is on
+  then debug() { : "$red^^^DEBUG^^^$plain"; }	# debug command was visible
+  else debug() {
+    if [ -n "$DEBUG" ]; then
+      warn "${red}DEBUG:$plain $*"
+    fi
+  }
+fi
+
+# options
+count=0
+dns_max=10
+# guesses of common selectors stolen and expanded from
+# https://dmarcguide.globalcyberalliance.org/#/tool-select?d=example.com
+selectors="default,email,google*,google2048,google1024,mail,post"
+selectors="$selectors,selector1,selector2,smtpapi,s1024,s2048"
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+if [ "$*" = -h ]; then help; fi	# special clause for standalone `-h` being help
+while getopts @:cd:hsv-: OPT; do
+  if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#$OPT}" OPTARG="${OPTARG#=}"
+  fi
+  case "$OPT" in
+    @ |via|at)	needs_arg; via="$OPTARG" ;;
+    c | count )	count=1 ;;
+    color )	case "$OPTARG" in
+    		  ( never ) CLICOLOR_FORCE=0; unset CLICOLOR ;;
+    		  ( [0Nn]* ) unset CLICOLOR ;;
+    		  ( auto ) CLICOLOR=1 ;;
+    		  ( * ) CLICOLOR_FORCE=1 ;;
+    		esac ;;
+    d | dns* )	needs_arg; dns_max="$OPTARG" ;;
+    debug )	DEBUG=1; debug "debug enabled by command line" ;;
+    h | human*)	human=1 ;;
+    help )	help ;;
+    s | sel* )	needs_arg; selectors="$OPTARG" ;;
+    v | verb*)	verbose=1 ;;
+    \? )	exit 2 ;; # bad short option (error reported via getopts)
+    * ) 	die "Illegal option --$OPT" ;; # bad long option
+  esac
+done
+shift $((OPTIND-1))
+
+if [ -n "$via" ]; then
+  host() {
+    local out retval
+    out=$(command host "$@" "$via")
+    retval=$?
+    echo "$out" |awk '
+      NF > 0 && ! /^(Using domain server|Name|Address|Aliases):/
+    '
+    return $retval
+  }
+fi
+
+_txt() { host -t TXT "$@"; }
+if [ "$verbose" = 1 ]
+  then txt() { _txt "$@"; }
+  else txt() {
+    local out retval
+    out=$(_txt "$@")
+    retval=$?
+    echo "$out" |awk '
+      $2$3 != "descriptivetext" || tolower($4) ~ /^"v=(dkim|dmarc|spf)/
+    '
+    return $retval
+  }
+fi
+
+# quotes as variables (makes quoting quotes easier)
+q='"'
+qqq="$q'"
+
+# warnings and errors in red if interactive or forced colors
+if [ -t 1 -a "$TERM$-" != "$CLICOLOR$LS_COLORS${TERM#*colo}${-#*i}" ] \
+|| [ -n "$CLICOLOR_FORCE" ]
+  then red='[1;31m' plain='[m'
+  else unset red plain
+fi
+
+# true when given an empty response or failure from `host`
+no_record() {
+  [ -z "${1##* has no *}" -a -n "$1" ] || [ -z "${1##*(NXDOMAIN)*}" ]
+}
+
+filter_dnstypes() {
+  awk '$2$3$5 != "hasnorecord" || $4 !~ /^(AAAA|SPF)$/'
+}
+
+# Usage: lookup TYPE [REAL_DOMAIN@]DOMAIN
+# Look up DNS record TYPE for DOMAIN.  REAL_DOMAIN tracks through redirection.
+lookup() {
+
+  local TYPE DOMAIN ANS ANS1 mechanism REAL_DOMAIN
+  TYPE="$1"
+  DOMAIN="$2"
+  REAL_DOMAIN="$DOMAIN"
+  if [ "${DOMAIN#*@}" != "$DOMAIN" ]; then
+    REAL_DOMAIN="${DOMAIN%@*}"
+    DOMAIN="${DOMAIN#*@}"
+  fi
+  DOMAIN="${DOMAIN%.}." 		# ensure the domain has a trailing dot
+  REAL_DOMAIN="${REAL_DOMAIN%.}."	# ensure the domain has a trailing dot
+
+  beenthere="$beenthere $TYPE:$DOMAIN" # lack of trailing space is INTENTIONAL
+  if [ "$beenthere" != "${beenthere##* $TYPE:$DOMAIN *}" ]; then
+    echo "(redundancy:  already traversed $TYPE record for '$DOMAIN')"
+    return 1
+  fi
+
+  DNS_QUERIES=$((DNS_QUERIES+1))
+  debug "lookup, query#$DNS_QUERIES, SHLVL=$SHLVL"
+
+  # If there is no record, pass the result to the output
+  ANS="$(host -t $TYPE $DOMAIN |filter_dnstypes)"
+  if [ -n "$ANS" ] && [ "$ANS" != "$DOMAIN has no SPF record" ]; then
+    echo "$ANS"
+  fi
+
+  # evaluate SPF record versus TXT record
+  if [ "$TYPE" = "SPF" ]; then
+
+    ANS1="$(txt "$DOMAIN" |sort)"
+    beenthere="$beenthere TXT:$DOMAIN"
+
+    if no_record "$ANS"
+
+      then ANS="$ANS1"; echo "$ANS"
+
+      # otherwise, if there IS a TXT record, it differs, and we haven't seen it
+      elif ! no_record "$ANS1" && [ "$ANS" != "$ANS1" ] \
+      && [ -n "${beenthere##* TXT:$DOMAIN *}" ]; then
+        echo "WARNING: SPF and TXT records differ for $DOMAIN!  Using BOTH." >&2
+        ANS="$(echo "$ANS"; echo "$ANS1")"
+        echo "$ANS1"
+
+    fi
+
+  fi
+
+  # true when not redirected plus $ANS has "spf" and lacks " has no "
+  if [ "$REAL_DOMAIN" = "$DOMAIN" ] \
+  && (no_record "$ANS" || [ -n "${ANS##*spf*}" ])
+    then return 1
+  fi
+
+  # Apply local elements of redirect target's SPF results to the original domain
+  DOMAIN="$REAL_DOMAIN"
+
+  ANS=${ANS#*$q}
+  ANS=${ANS%$q}
+  # TODO: this for loop should call a new function and use case/esac
+  for mechanism in $ANS; do
+
+    # clean up odd quotes (e.g. ext2._spf.citigroup.com)
+    mechanism="${mechanism#[$qqq]}"
+    mechanism="${mechanism%[$qqq]}"
+    # remove implicit plus qualifier
+    mechanism="${mechanism#+}"
+
+    # Skip "exists" (e.g. dhl.com), which we can't look up exhaustively without
+    # either an AXFR query (-> NOTAUTH) or brute force (-> get sued).
+    # exists: https://tools.ietf.org/html/rfc7208#section-5.7
+    # Also skips "exp" (references to TXT records) since that doesn't concern us
+    # Also skips items that are now empty and non-passing qualifiers
+    if [ -z "${mechanism##exists:*}" ] || [ -z "${mechanism##exp:*}" ] \
+    || [ -z "${mechanism##[-~?]*}" ]; then
+      continue
+
+    # Not enough info for macros.  https://tools.ietf.org/html/rfc7208#section-7
+    # Macros shouldn't exist outside of exists: anyway, and we skip those.
+    elif [ -z "${mechanism##*%*}" ]; then
+      if [ -z "${mechanism##*%*%*}" ]; then plural="s"; else plural=; fi
+      printf "\n${red}WARNING: unsupported macro%s found in${plain} %s\n" \
+        "$plural" "$mechanism"
+      echo "         Consider parsing it manually based on the guide at"
+      echo "         https://tools.ietf.org/html/rfc7208#section-7"
+      echo ""
+      continue
+
+    elif [ "${mechanism%:}" = a ]; then
+      lookup A "$DOMAIN"
+      lookup AAAA "$DOMAIN"
+
+    elif [ "${mechanism#a:}" != "$mechanism" ]; then
+      lookup A "${mechanism#a:}"
+      lookup AAAA "${mechanism#a:}"
+
+    elif [ "${mechanism%:}" = mx ]; then
+      hasmx "$DOMAIN" nocheck
+    elif [ "${mechanism#mx:}" != "$mechanism" ]; then
+      hasmx "${mechanism#mx:}" nocheck
+
+    # include: https://tools.ietf.org/html/rfc7208#section-5.2
+    elif [ "${mechanism#include:}" != "$mechanism" ]; then
+      lookup "$TYPE" "${mechanism#include:}" |awk '
+        # print only non-TXT records and TXT records that are SPF
+        # (This avoids google-site-verification, etc. for included domains)
+        $2 $3 != "descriptivetext" || $4 ~ /^"?v=spf[0-9]$/
+      '
+
+    # exists: https://tools.ietf.org/html/rfc7208#section-5.7
+    elif [ "${mechanism#exists=}" != "$mechanism" ]; then
+      echo 'WARNING: this script has not implemented the `exists` mechanism' >&2
+      DNS_QUERIES=$((DNS_QUERIES+1))
+
+    # redirect: https://tools.ietf.org/html/rfc7208#section-6.1
+    elif [ "${mechanism#redirect=}" != "$mechanism" ]; then
+      lookup "$TYPE" "$DOMAIN@${mechanism#redirect=}"
+
+    fi
+
+  done
+
+}
+
+
+# Usage: probe HOST PORT
+# returns true when PORT is open on HOST
+if type ncat >/dev/null 2>&1 # comes with nmap, wait time is in milliseconds
+  then probe() { ncat --send-only --recv-only -w 334ms $1 $2; }
+elif type nc >/dev/null 2>&1
+  then probe() { nc -zw1 $1 $2; }
+else   probe() { echo X |telnet -e X $1 $2; }
+fi
+
+
+smtp() {
+  local RETVAL via
+
+  # Some networks block port 25 outbound, in which case this will ALWAYS fail.
+  # This stanza notifies the user of this if gmail's primary MX is closed.
+  if [ -z "$gmail_mx" ]; then
+    gmail_mx="$(host -t MX gmail.com. |sort -nk6)"
+    probe "${gmail_mx##* }" 25 >/dev/null 2>&1 \
+      || maybe_blocked=" (is YOUR outbound port 25 blocked?)"
+  fi
+
+  if [ -n "$2" ]
+    then via="via MX record $2"
+    else via="directly"
+  fi
+
+  probe "${2:-$1}" 25 >/dev/null 2>&1
+  RETVAL=$?
+  [ $RETVAL = 0 ] && what="serves" && unset RETVAL || what="does not serve"
+  # suppress the maybe_blocked notification if we connected!
+  echo "$1 $what SMTP $via${RETVAL+$maybe_blocked}"
+  return $RETVAL
+}
+
+
+# print only the last column, minus an optional trailing dot
+cz() { awk '{sub(/\.$/,"",$NF); print $NF}'; }
+
+
+hasmx() {
+  local ANS BOGUS
+  ANS="$(lookup MX "$@" |sort -nk6)"
+  echo "$ANS"
+
+  if [ "$ANS" != "${ANS#* has no MX}" ]; then MX=false; return 1; fi
+
+  ANS="$(echo "$ANS" |cz)"
+
+  for record in $ANS; do
+    echo $record |grep '^[0-9][0-9.]*$' >/dev/null && continue
+    record="$(lookup A $record; lookup AAAA $record)"
+    echo "$record"
+    ANS="$ANS "$(echo $record |cz)""
+  done
+
+  for verify in $ANS; do
+    case "$verify" in
+      0.* | 127.* | 10.* | 192.168.* | 22[4-9].* | 2[3-9][0-9].* )
+        echo "$1 has invalid MX record '$verify'"; return 1 ;;
+    esac
+  done
+
+  BOGUS="$(host "${1%.}.bogusmx.rfc-ignorant.org." |grep 'has address 127\.0')"
+  BOGUS=${BOGUS##*0.}
+  if [ -n "$BOGUS" ]
+    then host $ANS
+         ! echo "$1 has bogus MX record '$ANS' (rfc-ignorant level $BOGUS)"
+    elif [ "$2" != nocheck ]; then
+         smtp "$1" "$ANS"
+  fi
+}
+
+
+# this is a function because it temporarily redefines $IFS to loop over CSV data
+get_dkim() {
+  local IFS=',' dom="$1"
+  shift
+  for selector in $@; do
+    txt "$selector._domainkey.$dom" 2>&1 \
+      |grep -vFw -e NXDOMAIN -e 'has no TXT record'
+  done
+}
+# parent lookup call
+spf() {
+  local MX # this gets set by hasmx()
+  if host "${1%.}." |GREP_OPTIONS='' grep not.found
+    then false
+    else
+      txt "_dmarc.$1"
+      get_dkim "$1" "$selectors"
+      lookup SPF "$1" || hasmx "$1" \
+        || if [ "$MX" = false ]; then smtp "$1"; else false; fi
+  fi
+}
+
+
+for host in ${1+"$@"}; do
+
+  # RFC 7208 section 11.1: at most 10 lookups (+1 for the initial query)
+  DNS_QUERIES=-1
+  export DNS_QUERIES # doesn't work perhaps because of cmd subst invocation
+
+  # $beenthere is a global variable used in lookup() to prevent loops.
+  # we reset it for each host and also use it to delimit between hosts
+  if [ -n "$beenthere" ]; then echo --; fi
+  unset beenthere
+
+  if spf "$host"; then
+    if [ "$DNS_QUERIES" -le $dns_max ]; then
+      RETVAL=0
+    #else
+    #  OUT="$host: PermError ($DNS_QUERIES DNS queries exceeds RFC 7208 # 11.1"
+    #  echo "$OUT max of $dns_max)" >&2
+    #  RETVAL=2
+    fi
+  fi |awk -v count="$count" -v host="$host" -v human="$human" -v OFMT="%.20g" '
+    # Convert numbers to comma-separated numbers WITHOUT math (32-bit issues)
+    function readable(num) {
+      if (!human) return num
+      while (length(num)%3) num = "0" num
+      gsub(/.../, ",&", num)
+      gsub(/^[0,]+/, "", num)
+      return num
+    }
+    !count { print }
+    # BUG: Anything listed twice (say by mx and ip4 CIDR) is counted twice
+    #      This is very difficult to resolve (we would have to track all IPs)
+    $2$3 == "hasaddress" { ip4++; next }
+    $2$3$4 == "hasIPv6address" { ip6++; next }
+    { for (i=1; i<=NF; i++) {
+        $i = tolower($i)
+        if ($i == "all" || $i == "+all") { all=1; continue }
+        if ($i ~ /=|^(exists:|include:|.all$|ptr(:|$))/) continue
+        cidr = $i
+        gsub(/^.*\//, "", cidr)
+        if ($i ~ /^ip4:./) {
+          if (cidr == $i) cidr = 32
+          ip4 += 2^(32-cidr)
+        } else if ($i ~ /^ip6:./) {
+          if (cidr == $i) { ip6++ }
+          else if (cidr > 64) { ip6 += 2^(128-cidr) }
+          else { ip6_64 += 2^(64-cidr) }
+        }
+      }
+    }
+    END {
+      e = " enumerated"
+      if (!count) print ""
+      if (ip4) printf "%s: IPv4 hosts%s: %s\n", host, e, readable(ip4)
+      if (ip6_64) excl = " (excluding IPv6 /64 networks)"
+      if (ip6) printf "%s: IPv6 hosts%s%s: %s\n", host, excl, e, readable(ip6)
+      if (ip4 && ip6 ) {
+        printf "%s: all%s hosts%s: %s\n", host, excl, e, readable(ip6 + ip4)
+      }
+      if (ip6_64) {
+        printf "%s: IPv6 /64 networks%s: %s\n", host, e, readable(ip6_64)
+      }
+      if (all) print "Additionally, ALL hosts are explicitly permitted"
+    }
+  '
+done
+
+exit ${RETVAL:-1}
