@@ -22,8 +22,8 @@ Usage:  ${0##*/} [OPTIONS] [APP [APP ARGS]]
                    for a network range, containing -r, -s, and any of [sptuPf].
   -r remote-net    An IP/Subnet pair (like -l) for within a net-conf scope.
   APP [APP ARGS]   Full command to run with SOCKS (default=${SHELL:-/bin/sh}).
-tsocks-wrapper 0.4+20150819, Copyright 2009+ by Adam Katz, GPLv2 (like tsocks)
-Part of net-scripts:  https://github.com/adamhotep/net-scripts
+Part of net-scripts: https://github.com/adamhotep/net-scripts
+tsocks-wrapper 0.4.20150819.1, Copyright 2009+ by Adam Katz, GPLv2+
 /help
 }
 

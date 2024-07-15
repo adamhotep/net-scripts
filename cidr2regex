@@ -14,11 +14,13 @@ or
 
 This script requires perl modules Regexp::Assemble and Net::CIDR.
 
-cidr2regex v0.3.20180708 Copyright (c) 2010+ by Adam Katz, 2-clause BSD license
+Part of net-scripts: https://github.com/adamhotep/net-scripts
+
+cidr2regex 0.3.20180708.1 Copyright 2010+ by Adam Katz, GPLv2+
 
 =head1 AUTHORS
 
-Adam Katz E<lt>https://github.com/adamhotep/net-scriptsE<gt>
+Adam Katz E<lt>https://github.com/adamhotepE<gt>
 
 =cut
 

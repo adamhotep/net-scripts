@@ -10,8 +10,8 @@ Usage: eml2mbox [OPTIONS] [FILE...]
   FILEs may be either .eml (RFC 5322) file or it may be a list of such files.
   eml2mbox will assume everything is the same format as the first input file.
 
-eml2mbox v0.4.20170408, Copyright (C) 2010+ by Adam Katz, GPLv2+
 Part of net-scripts: https://github.com/adamhotep/net-scripts
+eml2mbox 0.4.20170408.1, Copyright 2010+ by Adam Katz, GPLv2+
 /help
   exit
 }

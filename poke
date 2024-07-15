@@ -8,8 +8,8 @@ Usage: poke [-av] target[:port] [target[:port] ...]
   target  Any IP address or domain name, like 192.168.0.1 or www.google.com
   port    Port to probe (defaults to 80, http)
 
-poke 0.7, Copyright 2005+ by Adam Katz, GPLv2+
-Part of net-scripts:  https://github.com/adamhotep/net-scripts
+Part of net-scripts: https://github.com/adamhotep/net-scripts
+poke 0.7.20131031.1, Copyright 2005+ by Adam Katz, GPLv2+
 /help
 }
 

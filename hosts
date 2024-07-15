@@ -7,11 +7,13 @@ help() {
                     -e "3 { s/^/ /; s/ $h.*/ [-S server ] $h [$h...]/ }" \
                     -e "/^ *-s/ { p; s/s.*/S specifies the DNS server/ }" \
                     -e "/^ *-v/ { p; s/v.*/V show version and license info/ }"
+  echo ''
+  version
 }
 
 version() {
-  echo "hosts 0.2+20160326, Copyright 2002+ by Adam Katz, GPL v2+"
-  echo "Part of net-scripts:  https://github.com/adamhotep/net-scripts"
+  echo "Part of net-scripts: https://github.com/adamhotep/net-scripts"
+  echo "hosts 0.2.20160326.1, Copyright 2002+ by Adam Katz, GPL v2+"
 }
 
 # exits with an error if we are missing an option's required argument

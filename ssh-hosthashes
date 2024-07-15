@@ -15,7 +15,7 @@ ssh-hosthashes, e.g.
 
     sudo cat /home/some_user/.ssh/known_hosts |ssh-hosthashes
 
-ssh-hosthashes v0.2+20160312 Copyright 2010+ by Adam Katz, 2-clause BSD
+ssh-hosthashes 0.2.20160312.1 Copyright 2010+ by Adam Katz, GPLv2+/BSD 2-clause
 
 =head1 AUTHORS
 

@@ -18,11 +18,13 @@ You can also pipe this from an SPF record, e.g.
 
 This script requires perl module Net::CIDR.
 
-cidr2ips v0.3+20120815 Copyright (c) 2010+ by Adam Katz, 2-clause BSD license
+Part of net-scripts: https://github.com/adamhotep/net-scripts
+
+cidr2ips 0.3.20120815.1 Copyright 2010+ by Adam Katz, GPLv2+
 
 =head1 AUTHORS
 
-Adam Katz E<lt>https://github.com/adamhotep/net-scriptsE<gt>
+Adam Katz E<lt>https://github.com/adamhotepE<gt>
 
 =cut
 
