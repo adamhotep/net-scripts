@@ -1,48 +1,51 @@
 #!/bin/bash
-##########################################
-## rdesktop-wrapper
-## This is a wrapper around rdesktop to handle ssh tunnels and a nickname index
-## 
-## * You can specify a tunneled host as if it were in your local network
-## * You can specify a host mapped in your ~/.rdesktop_table file
-## * You can specify user accounts as part of the hostname, like user@host
-## * Three new options:  --list-maps, --map-help, --completion-help
-## * You can have entries in '~/.rdesktop_table' like:
-##     #title  	[user@]server[:port]	# default port=3389, user=$USER
-##     hannibal	localhost:13389
-##     scipio 	adam@scipio
-## * If you use alternate remote desktop ports in your ssh tunnels, you can
-##   put a comment that says "rdesktop" above it.  Say "rdesktop next 4" to
-##   indicate that the next four nonwhitespace lines are remote desktop tunnels.
-## 
-## v0.6, Copyright (c) 2006-2010 by Adam Katz, GPLv2+
-## Part of net-scripts:  https://github.com/adamhotep/net-scripts
-## 
-##########################################
-### 0.1 Initial alpha-release; stable for ME, used more than daily.
-###     Rather messy code, known bug with spaced arguments, needs rehaul,
-###     and the inclusion of perl is silly (but more reliable than sed -r).
-### 0.2 Better help
-### 0.3 Fixed bug with more than one tunnel per host in ssh_config, zsh comp fix
-### 0.4 Fixed nmap bug, there are likely more...
-### 0.5 Now using bash for arrays so this works with quoted (spaced) parameters
-### 0.6 Rewrote ssh_config parser, allow ssh_config comment hint
-### You can debug this by setting $DEBUG to "true" before running this script
-##########################################
-### TODO
-###   * Rewrite the whole thing in perl (lots of work; it works fine as is...)
-###   * Reconsider blanket exclusion of wildcard hosts in sshd_config
-###   * Test to see if connected to a host before okaying its ssh tunnels
-###   * Get somebody to say they use and like this script
-##########################################
+help() { cat <</help
+rdesktop-wrapper
+This is a wrapper around rdesktop to handle ssh tunnels and a nickname index
 
-help() { sed -e '/^## /!d' -e 's///' "`which $0 || echo $0`"; }
+* You can specify a tunneled host as if it were in your local network
+* You can specify a host mapped in your ~/.rdesktop_table file
+* You can specify user accounts as part of the hostname, like user@host
+* Three new options:  --list-maps, --map-help, --completion-help
+* You can have entries in '~/.rdesktop_table' like:
+    #title  	[user@]server[:port]	# default port=3389, user=$USER
+    hannibal	localhost:13389
+    scipio 	adam@scipio
+* If you use alternate remote desktop ports in your ssh tunnels, you can
+  put a comment that says "rdesktop" above it.  Say "rdesktop next 4" to
+  indicate that the next four nonwhitespace lines are remote desktop tunnels.
+
+Part of net-scripts: https://github.com/adamhotep/net-scripts
+rdesktop-wrapper 0.6.20240714.0, Copyright 2006+ by Adam Katz, GPLv2+
+
+/help
+}
+
+##########################################
+# 0.1 Initial alpha-release; stable for ME, used more than daily.
+#     Rather messy code, known bug with spaced arguments, needs rehaul,
+#     and the inclusion of perl is silly (but more reliable than sed -E).
+# 0.2 Better help
+# 0.3 Fixed bug with more than one tunnel per host in ssh_config, zsh comp fix
+# 0.4 Fixed nmap bug, there are likely more...
+# 0.5 Now using bash for arrays so this works with quoted (spaced) parameters
+# 0.6.20100513 Rewrote ssh_config parser, allow ssh_config comment hint
+# 0.6.20240707 Using more portable `sed -E` in place of `sed -r`, rewrote help()
+#              At this point, this code is abandonware; I don't use it any more.
+# You can debug this by setting $DEBUG to "true" before running this script
+##########################################
+# TODO
+#   * Rewrite the whole thing in perl (lots of work; it works fine as is...)
+#   * Reconsider blanket exclusion of wildcard hosts in sshd_config
+#   * Test to see if connected to a host before okaying its ssh tunnels
+#   * Get somebody to say they use and like this script
+##########################################
 
 completion_help() { echo \
 'For hosts tab completion in zsh, add these lines to your .zshrc:
  function _get_rdesktops() {
   reply=(`
-    rdesktop --list-maps 2>/dev/null |sed -r "s/^port.*maps ([^:]+):.*ough/\1/"
+    rdesktop --list-maps 2>/dev/null |sed -E "s/^port.*maps ([^:]+):.*ough/\1/"
     _get_hosts
   `)
  }
@@ -112,6 +115,10 @@ scanpath() {
   for d in `echo $PATH |sed 's/:/ /g'`; do ls "$d/$1" 2>/dev/null; done
 }
 
+if [ -n "$help" ]; then
+  help
+fi
+
 debug "finding 'rdesktop' in path"
 [ -n "`echo $0 |grep /`" ] && apath="$0" && aline=1 || aline=2
 run=`scanpath rdesktop |grep -v "^$apath$" |sed "${aline}q;d"`
@@ -119,7 +126,8 @@ run=`scanpath rdesktop |grep -v "^$apath$" |sed "${aline}q;d"`
 debug "we will use the second hit in the path, which is '$run'"
 
 if [ -n "$help" ]; then
-  help; echo ''; $run -h; exit 0
+  $run -h
+  exit 0
 fi
 
 # throw all but last argument into $args array
