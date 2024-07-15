@@ -6,8 +6,8 @@ Usge: mx [OPTIONS] host [host...]
   -0, --as-is     Do not clean up arguments. Assume hosts are valid.
   -d, --dns=HOST  Use HOST as the DNS server
 
-v0.6.20230923.0 copyright 2010+ by Adam Katz, GPLv2+
 Part of net-scripts: https://github.com/adamhotep/net-scripts
+mx 0.6.20230923.1 Copyright 2010+ by Adam Katz, GPLv2+
 /help
 exit
 }
@@ -20,11 +20,11 @@ if ! command -v column >/dev/null 2>&1; then column() { cat; }; fi
 
 die() { echo "$*" >&2; exit 2; }  # complain to STDERR and exit with error
 needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
-while getopts 0d:hvV-: opt; do
+while getopts 0d:hvV-: OPT; do
   if [ "$OPT" = - ]; then # long opt https://stackoverflow.com/a/28466267/519360
     OPT="${OPTARG%%=*}" OPTARG="${OPTARG#$OPT}" OPTARG="${OPTARG#=}"
   fi
-  case $opt in
+  case $OPT in
     ( 0 | as-is )	as_is="-0" ;;
     ( d | dns* )	needs_arg; dns="$OPTARG" ;;
     ( h* )		help ;;
