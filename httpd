@@ -1,0 +1,125 @@
+#!/bin/sh
+help() { cat <</help
+Listen for incoming HTTP requests (a wrapper for busybox's simple httpd applet)
+Usage: ${0##*/} [OPTIONS]
+
+  -c, --config=FILE        Configuration (default: httpd.conf in /etc or \$HOME)
+  -d, --decode=STRING      Ignore other flags and decode given URI string
+  -D, --daemon             Daemonize: run in the background
+  -e, --encode=STRING      Ignore other flags and URI-escape given string
+  -f, --foreground         Run in the foreground (default)
+  -h, --root=PATH          Use this document root (default: .)
+  --host=HOSTNAME          Use this hostname (default: localhost)
+  -i, --inetd              Inetd mode
+  -m, --crypt=STRING       Ignore other flags and md5-encode given STRING
+  -p, --port=[HOST:]PORT   Listen to hostname:port (default: 8000, 80 if root)
+  -r, --realm=STRING       Basic authentication realm description
+  -u, --user=USER[:GROUP]  UID/GID after binding (default: www-data if root)
+  -v, --verbose            Verbose (specify twice for more)
+
+More docs in the C code: https://git.busybox.net/busybox/tree/networking/httpd.c
+
+/help
+  echo "Wraps $(busybox httpd --help 2>&1 |head -n1)"
+  version
+}
+version() {
+  echo "Part of net-scripts: https://github.com/adamhotep/net-scripts"
+  echo "httpd-wrapper 0.1.20241208.0, Copyright 2024+ by Adam Katz, GPL v2+"
+  exit
+}
+
+die() { [ $# -gt 0 ] && printf "%s\n" "$@" >&2; exit 2; }
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+sethost() {
+  if [ "$1" -gt 0 ] 2>/dev/null; then	# just a port
+    port="$1"
+  elif [ "${1#*:}" -gt 0 ] 2>/dev/null; then	# host:port
+    host="${1%:*}"
+    port="${1#*:}"
+  else
+    host="$1"
+    port=''
+  fi
+}
+
+# defaults
+args=''
+daemon="-f"
+docroot="$PWD"
+host=127.0.0.1
+port=8000
+try80=''
+verbose=0
+if [ 0 = "$(id -u)" ]; then	# we are root
+  try80=1	# default to port 80 if it's not already in use (check later)
+  if id -u www-data >/dev/null 2>&1; then
+    user="-uwww-data"
+  fi
+fi
+
+if [ "$*" = -h ]; then help; fi	# special case for `httpd -h` on its own
+while getopts c:d:De:fh:im:p:r:u:vV-: OPT; do
+  if [ "$OPT" = - ]; then  # --long: https://stackoverflow.com/a/28466267/519360
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}"
+  fi
+  case "$OPT" in
+    ( c | conf* )	needs_arg; conf="-c$OPTARG" ;;
+    ( d | dec* | url* )	needs_arg; exec busybox httpd -d "$OPTARG" ;;
+    ( D | b*g* | d* )	daemon="" ;;
+    ( e* | html* )	needs_arg; exec busybox httpd -e "$OPTARG" ;;
+    ( f | f*g* )	daemon="-f" ;;
+    ( h | home | doc* | root* )	needs_arg; docroot="$OPTARG" ;;
+    ( help* )		help ;;
+    ( host* )		needs_arg; host="$OPTARG" ;;
+    ( i | inetd )	args="${args:--}i" ;;
+    ( m* | crypt* )	needs_arg; exec busybox httpd -m "$OPTARG" ;;
+    ( p | port )	needs_arg; try80=''; sethost "$OPTARG" ;;
+    ( q | quiet )	quiet=1 verbose=$((verbose - 1)) ;;
+    ( r | realm )	needs_arg; realm="-r$OPTARG" ;;
+    ( u | user )	needs_arg; user="-u$OPTARG" ;;
+    ( v | ver | verb* )	args="${args:--}v" verbose=$((verbose + 1)) ;;
+    ( V | vers* )	version ;;
+    ( \? )		die ;; # bad short option (error reported via getopts)
+    ( * )		die "Illegal option --$OPT" ;; # bad long option
+  esac
+done
+shift $((OPTIND - 1))
+
+if ! command -v busybox >/dev/null; then
+  die 'You need to install busybox first! (Maybe `apt install busybox`?)'
+fi
+if ! busybox --list |grep -xq httpd; then
+  die 'Your version of busybox does not contain the `httpd` applet'
+fi
+
+if [ -z "$quiet" ] || [ "$verbose" -gt 0 ]; then
+  echo "Now serving $docroot at http://$host:$port"
+  if [ ! -f "$docroot/index.html" ] && [ ! -f "$docroot/cgi-bin/index.cgi" ]
+  then
+    echo "(note: no index.html found and directory listing is unsupported)"
+  fi
+fi
+
+# true when given an IPv4 address
+is_ipv4() {
+  local IFS=. n=0
+  for s in $*; do
+    [ "$s" -lt 256 ] 2>/dev/null && [ "$s" -ge 0 ] && n=$((n + 1)) || return 1
+  done
+  [ $n = 4 ]
+}
+
+if ! is_ipv4 "$host"; then
+  host="$( { getent ahostsv4 "$host" 2>/dev/null || getent hosts "$host"; } \
+    |awk 'NF > 1 && 0 == index($1, ":") { print $1; exit }')"
+fi
+
+# for root, an unspecified port defaults to 80 unless that's already in use
+if [ "$try80" = 1 ] && ! nc -z "$host" 80 2>/dev/null; then
+  port=80
+fi
+
+exec busybox httpd ${conf:+"$conf"} $args $daemon ${realm:+"$realm"} $user \
+  -h "$docroot" -p "$host${host:+:}$port"
