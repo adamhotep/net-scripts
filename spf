@@ -13,7 +13,7 @@ Usage: spf [OPTIONS] host [host...]
 Selectors are currently set to: $selectors
 
 Part of net-scripts: https://github.com/adamhotep/net-scripts
-spf 0.13.20240317.1 Copyright 2010+ by Adam Katz, AGPLv3
+spf 0.13.20241208.0 Copyright 2010+ by Adam Katz, AGPLv3
 /help
   exit
 }
@@ -158,7 +158,9 @@ lookup() {
       # otherwise, if there IS a TXT record, it differs, and we haven't seen it
       elif ! no_record "$ANS1" && [ "$ANS" != "$ANS1" ] \
       && [ -n "${beenthere##* TXT:$DOMAIN *}" ]; then
-        echo "WARNING: SPF and TXT records differ for $DOMAIN!  Using BOTH." >&2
+        warn "WARNING: TXT and SPF records differ for $DOMAIN!  Using BOTH."
+        warn "The experimental SPF DNS Resource Record is not allowed for use"
+        warn "in SPF; see https://www.rfc-editor.org/rfc/rfc7208#section-3.1"
         ANS="$(echo "$ANS"; echo "$ANS1")"
         echo "$ANS1"
 
