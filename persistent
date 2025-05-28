@@ -18,7 +18,7 @@ how to properly disengage a connection and prevent looping right back into
 a new ssh/xpra session.
 
 Part of net-scripts: https://github.com/adamhotep/net-scripts
-persistent 4.2.20231215.1 Copyright 2008+ Adam Katz, GPLv2+/BSD 2-clause
+persistent 4.2.20250417.0 Copyright 2008+ Adam Katz, GPLv2+/BSD 2-clause
 /help
   exit
 }
@@ -29,10 +29,10 @@ help_install() {
   # Note that it switches from single to double quotes to get variables' values
   message_text='DEPENDENCIES
 
-Currently, '"$iam"' supports SSH and xpra commands. This guide assumes you
+Currently, '"$iam"' supports SSH and Xpra commands. This guide assumes you
 know about SSH. Xpra ("screen for X11") is documented at https://xpra.org
 and can be installed with on Debian/Ubuntu/Mint systems with `apt install xpra`
-or `dnf install xpra` on Fedora/Red Hat/Alma systems.
+or, on Fedora/Red Hat/Alma systems, with `dnf install xpra`
 
 '"$iam"' has the ability to "pump" (restart) its connections on demand
 (see AUTO-PUMP below), which requires `pgrep`. Install with `apt install procps`or `dnf install procps`.
@@ -333,11 +333,16 @@ was_pumped() {
       warn "$iam: 12 tests without network, connection lost >= 68 minutes ago"
       die  "$iam: no AC power detected, exiting with failure code $ret" $ret
     elif [ $wait_time -gt 1 ]; then
-      printf '\r%s: no network, waiting for %ds...' "$iam" $wait_time >&2
+      pretty_time="$wait_time"s
+      if [ $wait_time -gt 60 ] && we_have timecalc; then
+        pretty_time=$(timecalc "$wait_time")
+      fi
+      printf '\r%s: no network, waiting for %s...' "$iam" $pretty_time >&2
     fi
     sleep $wait_time
-    # 1 2 4 8 16 32 1m 2m 4m 9m 17m 34m 1h 2h 4h ...
+    # 1 2 4 8 16 32 1m 2m 4m 9m 17m 34m 1h 2h 4h 8h 12h 12h 12h ...
     wait_time=$((wait_time * 2))
+    if [ $wait_time -gt 43200 ]; then wait_time=43200; fi	# 12h maximum
   done
   if [ $wait_time -gt 1 ]; then echo; fi	# complete 'no network' line
   min=$((min + (wait_time + 30) / 60))	# add wait time in rounded minutes
