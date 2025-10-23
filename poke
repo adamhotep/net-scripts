@@ -1,73 +1,169 @@
 #!/bin/sh
+iam=poke
 help() { cat <</help
 Test an IP or domain name for web service, return false if connection(s) fail
-Usage: poke [-av] target[:port] [target[:port] ...]
-  -a      Report all failures instead of quitting after first (takes longer)
-  -v      Verbose mode.  Reports success or failure (only first failure)
-  -2      Run again after 30s and report only target(s) that fail twice
-  target  Any IP address or domain name, like 192.168.0.1 or www.google.com
-  port    Port to probe (defaults to 80, http)
+Usage: $iam [OPTIONS] target[:port] [target[:port] ...]
+  -2, --double     Run twice; shorthand for \`--multi=2\`
+  -a, --all        Report all failures instead of quitting after first (slower)
+  -m, --multi=NUM  Run NUM times (each must succeed),
+                   sleep WAIT_TIME (see \`-w\`) between rounds
+  -o, --or         Exit with success on the first successful connection
+  -p, --port=PORT  Default port/service (currently $port, overridden by :port)
+  -q, --quiet      Undo verbose mode (default)
+  -v, --verbose    Verbose mode: report success or failure (use \`-a\` for all)
+  -V, --version    Report the version and exit
+  -w, --wait=TIME  Set the WAIT_TIME for \`-m\` (currently $wait)
+  -x, --exe=PATH   Path to nmap's \`ncat\` utility
+  target           An IP address or domain name, like 192.168.0.1 or example.com
+  port             Port number or service name to probe (defaults to 443, https)
 
-Part of net-scripts: https://github.com/adamhotep/net-scripts
-poke 0.7.20131031.1, Copyright 2005+ by Adam Katz, GPLv2+
 /help
+  version
 }
 
-PORT=80
-say=true
-ALL() { false; }
-filter() { echo "$*"; }
+version() {
+  echo "Part of net-scripts: https://github.com/adamhotep/net-scripts"
+  echo "poke 0.8.20251022.0, Copyright 2005+ by Adam Katz, GPLv2+"
+  exit
+}
+
 we_have() { type "$@" >/dev/null 2>&1; }
+say() { "$verbose" "$iam: $*"; }
+die() { [ $# -gt 0 ] && printf '%s\n' "$@" >&2; exit ${exit:-2}; }
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+if we_have getent; then
+  svc() { getent services "$@"; }
+elif [ -s /etc/services ]; then
+  svc() { awk -v s="$1" '$1 == s { print; exit }' /etc/services; }
+else
+  svc() {
+    case $1 in
+      ( http ) s=80 ;; ( https ) s=443 ;; ( smtp ) s=25 ;; ( ssh ) s=22 ;;
+      ( * ) die "/etc/services is missing, couldn't map service name '$1'" ;;
+    esac
+    echo "$1 $s"
+  }
+fi
+
+service2port() {
+  [ "$1" -gt 0 ] 2>/dev/null && [ "$1" -lt 65536 ] && echo $1 && return
+  ! svc "$1" | awk -F '[\t /]+' '{ print $2; exit 1 }' \
+    || die "Invalid service or port number '$1'"
+}
+
+try_help="Try \`$iam --help\` for more information."
+
+# defaults
+all=
+exe=
+multi=1
+or=
+port=443
+verbose=:
+wait=30
+
+while getopts 2ahm:op:qvVw:x:-: OPT; do
+  # support long options: https://stackoverflow.com/a/28466267/519360
+  if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
+    OPT="${OPTARG%%=*}" OPTARG="${OPTARG#"$OPT"}" OPTARG="${OPTARG#=}"
+  fi
+  case $OPT in
+    ( 2 | double | tw[oi]* )	multi=2 ;;
+    ( a | all* )		all=all ;;
+    ( h | help* )		help ;;
+    ( m | multi* )		needs_arg; multi="$OPTARG" ;;
+    ( o | or | any )		or=or ;;
+    ( p | port )		needs_arg; port="$OPTARG" ;;
+    ( q | quiet )		verbose=: ;;
+    ( v | verbos* )		verbose=echo ;;
+    ( V | ver* )		version ;;
+    ( w | wait* )		needs_arg; wait="$OPTARG" ;;
+    ( x | exe* )		needs_arg; exe="$OPTARG" ;;
+    ( \? )			die ;;
+    ( * )			die "Illegal option --$OPT" ;;
+  esac
+done
+shift $(( OPTIND - 1 ))
+
+if ! [ "$multi" -gt 0 ] 2>/dev/null; then
+  die "Invalid count '$multi'" "$try_help"
+fi
+
+ncat_args='--send-only --recv-only -w 334ms'
+if [ -n "$exe" ]; then
+  if ! we_have "$exe" || ! "$exe" $ncat_args -h >/dev/null 2>&1; then
+    die "Invalid ncat executable: $exe"
+  fi
+  ncat() { command "$exe" "$@"; }
+fi
 
 if we_have ncat 	# ncat (comes with nmap v5+) allows wait in ms
-  then probe() { ncat --send-only --recv-only -w 334ms $1 $2 >/dev/null 2>&1; }
+  then probe() {
+    p=$(service2port "$2") || die
+    ncat $ncat_args $1 $p >/dev/null 2>&1
+  }
 elif we_have nc 	# netcat; almost every system has this
-  then probe() { nc -zw1 $1 $2 >/dev/null 2>&1; }
+  then probe() {
+    p=$(service2port "$2") || die
+    nc -zw1 $1 $p >/dev/null 2>&1
+  }
 elif we_have nmap
-  then probe() { nmap -p$2 -P0 -sT $1 2>&1 |grep "^$2.*open" >/dev/null; }
+  then probe() { ! nmap -p"$2" -P0 -sT "$1" 2>&1 |awk '$2=="open" { exit 1 }'; }
 elif we_have telnet
-  then probe() { echo X |telnet -e X $1 $2 >/dev/null 2>&1; }
+  then probe() { echo X |telnet -e X "$1" "$2" >/dev/null 2>&1; }
 else
-  echo "ERROR: Missing ncat, nc (netcat), nmap, and even telnet!" >&2; exit 127
+  exit=127
+  die "ERROR: Missing ncat (nmap), nc (netcat), nmap, and even telnet!"
 fi
 
-while [ -n "$1" ]; do
- case $1 in
-  -2* | -a*2* )	shift; say=true;
-  		set placeholder -a "$@" --pause "$@" # do it twice!
-  		# filter for dups only; anything that fails only once is okay
-  		filter() { echo "$*" |sed 's/ /\n/g' |sort |uniq -d; } ;;
-  --pause* )	sleep 3 ;;
-  -va* | -av*)	shift; set placeholder -v -a "$@" ;;
-  -v* | --v* )	say=echo ;;
-  -a* | --a* )	ALL() { [ $# -gt 0 ] && date "+%Y%m%d %H:%M:%S $*"; true; } ;;
-  -h* | --h* )	help; exit 0 ;;
-  -*  | --*  )	echo "poke: invalid argument \`$1'" >&2
- 		help|grep ^Usage; exit 2 ;;
-  * ) 		P="${1#*:}"
- 		[ "$P" = "$1" ] || PORT="$P"
- 		TARGET="${1%%:*}"
- 		if probe "$TARGET" "$PORT"; then
- 		  hits="$hits $TARGET:$PORT"
- 		  ALL && $say "poke: successfully connected to $TARGET:$PORT"
- 		else
- 		  misses="$misses $TARGET:$PORT"
- 		  $say "poke: could not connect to port $PORT on $TARGET" 
- 		  (! ALL) && exit 1
- 		fi ;;
- esac
- shift
+main() {
+  local ret=
+  for target in "$@"; do
+
+    case "$target" in
+      ( '' )	continue ;;
+      ( ?*:?* )	this_port="${target##*:}" target="${target%:*}" ;;
+      ( * )	this_port="$port" ;;
+    esac
+
+    if probe "$target" "$this_port"; then
+      hits="$hits $target:$this_port"
+      say "successfully connected to $target:$this_port"
+      # --or without --all: one success is enough
+      if [ "$or" = or ] && [ "$all" != all ]; then return 0; fi
+      if [ -z "$ret" ] || [ "$or" = or ]; then ret=0; fi
+    else
+      misses="$hits $target:$this_port"
+      say "could not connect to $target:$this_port"
+      # neither --or nor --all: one failure is enough
+      if [ "$or" != or ] && [ "$all" != all ]; then return 1; fi
+      if [ -z "$ret" ] || [ "$or" != or ]; then ret=1; fi
+    fi
+
+  done
+
+  if [ -z "$hits$misses" ]; then
+    die "Too few arguments" "$try_help"
+  fi
+  return ${ret:-0}
+}
+
+sleep=:
+while [ $multi -gt 0 ] 2>/dev/null; do
+
+  [ $sleep = sleep ] && say "waiting for $wait"
+  $sleep "$wait" || die "Invalid time '$wait'"
+  sleep=sleep
+  multi=$((multi - 1))
+
+  main "$@"
+  ret=$?
+
+  if [ $ret -gt 0 ] && [ "$all" != all ]; then
+    exit $ret
+  fi
+
 done
 
-if [ -z "$hits$misses" ]; then 
-  echo "poke: too few arguments" >&2
-  echo "Try \`poke --help' for more information." >&2
-  exit 2
-fi
-
-(! ALL) && $say "poke: successfully connected to each of: $hits"
-
-misses=`filter $misses`
-[ -n "$misses" ] && ALL "poke: failed to connect to: $misses" \
-  && exit 1 || exit 0
-
+exit $ret
